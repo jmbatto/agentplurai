@@ -1,0 +1,6 @@
+dist
+out
+.git
+cline-config
+*.exe
+*.dll

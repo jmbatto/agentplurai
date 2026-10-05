@@ -1,0 +1,43 @@
+version: 1
+dryRun: false
+systemPrompt: |
+  Ne sors pas du volume déclaré.
+  N’inclus aucun jeton dans la réponse.
+history:
+  file: /work/mpi/.agentplurai/prompts.log
+  journal: /work/mpi/.agentplurai/actions.log
+track:
+  kind: git
+  branch: agent
+  refuseIfDirty: false
+engines:
+  - name: qwen-local
+    kind: model
+    model: "XXXX:8b"
+    access: http
+    endpoint: http://127.0.0.1:11434
+    thinking_progress: false
+    thinking_progress_style: italic
+    rendering_markdown: true
+    systemPrompt: |
+      Réponds sans modifier de fichier et utilise une approche d'ingénieur-expert en développement logiciel.
+
+  - name: cline-mpi
+    kind: agent
+    image: cline-mpi:go1.26.7
+    container: cline-mpi
+    access: docker-socket
+    shared:
+      host: D:/src/mpi-socket
+      container: /work/mpi
+    auth: volume
+    thinking_progress: true
+    thinking_progress_style: italic
+    rendering_markdown: true
+    systemPrompt: |
+      Volume /work/mpi uniquement. Pas de cgo. Pas de libmpi.
+      Travaille sur la branche agent/. Pas de push.
+projects:
+  - path: D:/src/mpi-socket
+    engine: cline-mpi
+    active: true

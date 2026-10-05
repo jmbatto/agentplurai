@@ -1,0 +1,56 @@
+# Windows tree: ./dist/bin/liteide.exe
+# Plugin sources: ./plugin-src  (edited by Cline inside plugin-dev)
+#
+#   docker compose build export
+#   docker compose run --rm export
+#   docker compose run --rm plugin-dev
+
+name: liteide-win
+
+x-build: &build
+  context: .
+  dockerfile: Dockerfile
+  args:
+    JOBS: "8"
+    GOPROXY: https://proxy.golang.org,direct
+
+services:
+  export:
+    build:
+      <<: *build
+      target: runtime
+    image: liteide-win-export:qt6
+    volumes:
+      - type: bind
+        source: ./dist
+        target: /dist
+        bind:
+          create_host_path: true
+    working_dir: /dist
+    restart: "no"
+
+  plugin-dev:
+    build:
+      <<: *build
+      target: dev
+    image: liteide-win-dev:qt6
+    working_dir: /work
+    stdin_open: true
+    tty: true
+    environment:
+      CLINE_TELEMETRY_DISABLED: "true"
+      DO_NOT_TRACK: "1"
+      LITEIDEX: /src/liteide/liteidex
+      PLUGIN_DIR: /work/plugin-src/liteideaf
+      DIST: /dist
+    volumes:
+      - type: bind
+        source: ./plugin-src
+        target: /work/plugin-src
+      - type: bind
+        source: ./dist
+        target: /dist
+      - type: bind
+        source: ./cline-config
+        target: /root/.cline
+    restart: "no"
