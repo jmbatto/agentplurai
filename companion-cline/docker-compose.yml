@@ -1,0 +1,31 @@
+# Companion lancé depuis le dossier du projet.
+# Le projet hôte est monté sur /work/project.
+# Le conteneur crée /work/project/.agentplurai pour l'historique.
+#
+# Depuis le projet :
+#   docker compose -f <chemin>/docker-compose.yml up -d
+
+
+name: cline-project
+
+services:
+  cline-project:
+    build: .
+    image: cline-project:go1.26.7
+    container_name: cline-project
+    stdin_open: true
+    tty: true
+    working_dir: /work/project
+    volumes:
+      - type: bind
+        source: ${PROJECT_DIR:-.}
+        target: /work/project
+      - type: bind
+        source: ${CLINE_CONFIG:-./cline-config}
+        target: /root/.cline
+    environment:
+      CLINE_TELEMETRY_DISABLED: "true"
+      DO_NOT_TRACK: "1"
+      GOTOOLCHAIN: local
+    # volontairement absent : /var/run/docker.sock
+    restart: "no"

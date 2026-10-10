@@ -1,0 +1,1 @@
+Le fichier YAML pour la configuration du plugin est à positionner là où se trouve le binaire de LiteIde
