@@ -166,9 +166,37 @@ void LiteIdeAfPlugin::hideLoadingDialog()
 
 QString LiteIdeAfPlugin::contractPath() const
 {
-    if (!m_app || !m_app->settings())
-        return "agentplurai.yaml";
-    return m_app->settings()->value("agentplurai/contract", "agentplurai.yaml").toString();
+    const QString configured = m_app && m_app->settings()
+        ? m_app->settings()->value("agentplurai/contract").toString()
+        : QString();
+    if (!configured.isEmpty() && QFileInfo(configured).isFile())
+        return QFileInfo(configured).absoluteFilePath();
+
+    QStringList dirs;
+    if (m_app && m_app->editorManager() && m_app->editorManager()->currentEditor())
+        dirs << QFileInfo(m_app->editorManager()->currentEditor()->filePath()).absolutePath();
+    if (m_app && m_app->fileManager())
+        dirs << m_app->fileManager()->folderList();
+    if (m_app && m_app->projectManager() && m_app->projectManager()->currentProject())
+        dirs << QFileInfo(m_app->projectManager()->currentProject()->filePath()).absolutePath();
+    dirs << QDir::currentPath();
+    if (m_app)
+        dirs << m_app->storagePath();
+    dirs << QDir::homePath();
+
+    const QStringList names = {"agentplurai.yaml", "agentplurai.yml"};
+    for (const QString &dir : dirs) {
+        if (dir.isEmpty())
+            continue;
+        for (const QString &name : names) {
+            const QString candidate = QDir(dir).filePath(name);
+            if (QFileInfo(candidate).isFile())
+                return QFileInfo(candidate).absoluteFilePath();
+        }
+    }
+    const QString fallbackDir = dirs.isEmpty() || dirs.first().isEmpty()
+        ? QDir::currentPath() : dirs.first();
+    return QDir(fallbackDir).filePath("agentplurai.yaml");
 }
 
 QString LiteIdeAfPlugin::yamlText() const
@@ -188,7 +216,17 @@ QString LiteIdeAfPlugin::activeCline() const
 {
     const QString text = yamlText();
     const int at = text.indexOf("projects:");
-    return scalar(at >= 0 ? text.mid(at) : text, "engine");
+    const QString named = scalar(at >= 0 ? text.mid(at) : text, "engine");
+    if (!named.isEmpty())
+        return named;
+    const QRegularExpression re("^\\s*- name:\\s*(\\S+)", QRegularExpression::MultilineOption);
+    QRegularExpressionMatchIterator it = re.globalMatch(text);
+    while (it.hasNext()) {
+        const QString name = it.next().captured(1);
+        if (blockValue(engineBlock(name), "kind") == "agent")
+            return name;
+    }
+    return QString();
 }
 
 QString LiteIdeAfPlugin::engineBlock(const QString &name) const
@@ -229,7 +267,7 @@ QString LiteIdeAfPlugin::containerRoot() const
     const QRegularExpressionMatch m = re.match(block);
     if (m.hasMatch())
         return m.captured(1);
-    return "/work/mpi";
+    return "/work/project";
 }
 
 QString LiteIdeAfPlugin::scopeText() const
@@ -346,10 +384,172 @@ bool LiteIdeAfPlugin::load(LiteApi::IApplication *app)
         connect(act, &QAction::triggered, this, slot);
     };
     addParam("IA par défaut", &LiteIdeAfPlugin::setDefaultAI);
+    addParam("Aligner le projet", &LiteIdeAfPlugin::alignProject);
     addParam("System prompt", &LiteIdeAfPlugin::editSystemPrompt);
     addParam("Santé", &LiteIdeAfPlugin::health);
     addParam("Quota Cline", &LiteIdeAfPlugin::showQuota);
     return true;
+}
+
+QString LiteIdeAfPlugin::currentProjectRoot() const
+{
+    if (m_app->projectManager()) {
+        LiteApi::IProject *project = m_app->projectManager()->currentProject();
+        if (project && !project->filePath().isEmpty())
+            return QFileInfo(project->filePath()).absolutePath();
+    }
+    if (m_app->fileManager()) {
+        const QStringList folders = m_app->fileManager()->folderList();
+        if (!folders.isEmpty())
+            return folders.first();
+    }
+    if (m_app->editorManager()) {
+        LiteApi::IEditor *ed = m_app->editorManager()->currentEditor();
+        if (ed && !ed->filePath().isEmpty())
+            return QFileInfo(ed->filePath()).absolutePath();
+    }
+    return QString();
+}
+
+QString LiteIdeAfPlugin::declaredHost() const
+{
+    return scalar(engineBlock(activeCline()), "host");
+}
+
+bool LiteIdeAfPlugin::updateDeclaredHost(const QString &host)
+{
+    const QString path = contractPath();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        warn("YAML illisible : " + path);
+        return false;
+    }
+    QString text = QString::fromUtf8(f.readAll());
+    f.close();
+    const QString normalized = QDir::fromNativeSeparators(host);
+    const QRegularExpression hostRe("(^|\\n)([ \\t]*)host:[^\\n]*");
+    const QRegularExpression pathRe("(^|\\n)([ \\t]*)path:[^\\n]*");
+    if (!hostRe.match(text).hasMatch()) {
+        warn("Clé host absente dans " + path);
+        return false;
+    }
+    text.replace(hostRe, "\\1\\2host: " + normalized);
+    text.replace(pathRe, "\\1\\2path: " + normalized);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        warn("YAML non écrivable : " + path);
+        return false;
+    }
+    f.write(text.toUtf8());
+    f.flush();
+    return true;
+}
+
+bool LiteIdeAfPlugin::recreateContainer(const QString &host)
+{
+    const QString engine = activeCline();
+    const QString block = engineBlock(engine);
+    const QString container = blockValue(block, "container").isEmpty() ? engine : blockValue(block, "container");
+    const QString image = blockValue(block, "image");
+    const QString composeFile = scalar(yamlText(), "composeFile");
+    if (!composeFile.isEmpty()) {
+        QProcess p;
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("PROJECT_DIR", QDir::toNativeSeparators(host));
+        p.setProcessEnvironment(env);
+        p.setWorkingDirectory(QFileInfo(composeFile).absolutePath());
+        p.start("docker", {"compose", "-f", composeFile, "up", "-d", "--force-recreate"});
+        if (!p.waitForFinished(120000) || p.exitCode() != 0) {
+            warn(QString::fromUtf8(p.readAllStandardError()));
+            return false;
+        }
+        return true;
+    }
+    if (image.isEmpty()) {
+        warn("Pas de composeFile ni d'image dans le YAML : recréation impossible.");
+        return false;
+    }
+    run("docker", {"stop", container}, 30000);
+    run("docker", {"rm", container}, 15000);
+    const QString mount = QDir::toNativeSeparators(host) + ":" + containerRoot();
+    int code = -1;
+    const QString out = run("docker", {"run", "-d", "--name", container,
+        "-v", mount, "-w", containerRoot(), image}, 60000, &code);
+    if (code != 0) {
+        warn(out);
+        return false;
+    }
+    return true;
+}
+
+void LiteIdeAfPlugin::alignProject()
+{
+    const QString live = currentProjectRoot();
+    if (live.isEmpty()) {
+        warn("Aucun dossier trouvé.\nOuvre un fichier, ou File > Open Folder.\n"
+             "LiteIDE n'a pas de projet formel ouvert, et aucun éditeur courant.");
+        return;
+    }
+    const QString path = contractPath();
+    if (!QFileInfo(path).isFile()) {
+        if (QMessageBox::question(m_app->mainWindow(), "AgentPlurAI",
+                "Aucun agentplurai.yaml trouvé.\nLe créer dans\n" + path + " ?") != QMessageBox::Yes)
+            return;
+        QFile created(path);
+        if (!created.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            warn("Création impossible : " + path);
+            return;
+        }
+        const QString host = QDir::fromNativeSeparators(live);
+        const QString skeleton =
+            "version: 1\n"
+            "dryRun: false\n"
+            "systemPrompt: |\n"
+            "  Ne sors pas du volume déclaré.\n"
+            "  N’inclus aucun jeton dans la réponse.\n"
+            "history:\n"
+            "  file: /work/project/.agentplurai/prompts.log\n"
+            "  journal: /work/project/.agentplurai/actions.log\n"
+            "engines:\n"
+            "  - name: cline-project\n"
+            "    kind: agent\n"
+            "    image: cline-project:go1.26.7\n"
+            "    container: cline-project\n"
+            "    access: docker-socket\n"
+            "    shared:\n"
+            "      host: " + host + "\n"
+            "      container: /work/project\n"
+            "    auth: volume\n"
+            "    systemPrompt: |\n"
+            "      Volume /work/project uniquement. Pas de cgo.\n"
+            "      Travaille sur la branche agent/. Pas de push.\n"
+            "projects:\n"
+            "  - path: " + host + "\n"
+            "    engine: cline-project\n"
+            "    active: true\n";
+        created.write(skeleton.toUtf8());
+        created.close();
+        info("Contrat créé :\n" + path);
+        return;
+    }
+    const QString declared = declaredHost();
+    if (QDir::fromNativeSeparators(live).compare(QDir::fromNativeSeparators(declared), Qt::CaseInsensitive) == 0) {
+        info("Le projet actif est déjà celui du YAML :\n" + live);
+        return;
+    }
+    const auto answer = QMessageBox::question(
+        m_app->mainWindow(), "AgentPlurAI",
+        "Le projet LiteIDE n'est pas celui du YAML.\n\nActif : " + live + "\nYAML : " + declared
+            + "\n\nMettre à jour le YAML et recréer le conteneur ?\n"
+              "(Docker ne peut pas changer un montage à chaud.)");
+    if (answer != QMessageBox::Yes)
+        return;
+    if (!updateDeclaredHost(live)) {
+        warn("Écriture du YAML impossible : " + contractPath());
+        return;
+    }
+    if (!recreateContainer(live))
+        return;
+    info("Conteneur recréé sur :\n" + live + "\n.agentplurai sera créé au démarrage.");
 }
 
 void LiteIdeAfPlugin::setDefaultAI()
@@ -426,6 +626,15 @@ void LiteIdeAfPlugin::showScope()
 
 void LiteIdeAfPlugin::sendPrompt()
 {
+    const QString live = currentProjectRoot();
+    const QString declared = declaredHost();
+    if (!live.isEmpty() && !declared.isEmpty()
+        && QDir::fromNativeSeparators(live).compare(QDir::fromNativeSeparators(declared), Qt::CaseInsensitive) != 0) {
+        alignProject();
+        if (QDir::fromNativeSeparators(currentProjectRoot()).compare(
+                QDir::fromNativeSeparators(declaredHost()), Qt::CaseInsensitive) != 0)
+            return;
+    }
     const QString engine = m_defaultEngine.isEmpty() ? activeCline() : m_defaultEngine;
     if (engine.isEmpty()) {
         warn("Aucun moteur actif. Réglez d'abord l'IA par défaut.");
@@ -515,7 +724,12 @@ void LiteIdeAfPlugin::sendPrompt()
         return;
     }
     showLoadingDialog(engine);
-    const QString container = activeCline();
+    const QString container = blockValue(block, "container");
+    if (container.isEmpty()) {
+        hideLoadingDialog();
+        warn("Pas de clé container dans le bloc " + engine + ".\nAjoute container: cline-project sous ce moteur.");
+        return;
+    }
     const QString inBox = "/tmp/agentplurai-prompt.txt";
     const QString logDir = containerRoot() + "/.agentplurai";
     run("docker", {"exec", container, "mkdir", "-p", logDir}, 8000);
@@ -602,8 +816,11 @@ void LiteIdeAfPlugin::showHistory()
     if (isModel) {
         out = "Historique non disponible pour " + engine + " : appel HTTP sans journal.";
     } else {
-        const QString path = scalar(block, "container") + "/.agentplurai/prompts.log";
-        out = run("docker", {"exec", engine, "cat", path}, 8000);
+        const QString container = blockValue(block, "container");
+        const QString path = containerRoot() + "/.agentplurai/prompts.log";
+        out = container.isEmpty()
+            ? "Pas de clé container pour " + engine
+            : run("docker", {"exec", container, "cat", path}, 8000);
         if (out.trimmed().isEmpty())
             out = "Historique vide ou absent : " + path;
     }
@@ -631,8 +848,11 @@ void LiteIdeAfPlugin::showJournal()
     if (isModel) {
         out = "Journal non disponible pour " + engine + " : modèle HTTP sans actions.";
     } else {
-        const QString path = scalar(block, "container") + "/.agentplurai/actions.log";
-        out = run("docker", {"exec", engine, "cat", path}, 8000);
+        const QString container = blockValue(block, "container");
+        const QString path = containerRoot() + "/.agentplurai/actions.log";
+        out = container.isEmpty()
+            ? "Pas de clé container pour " + engine
+            : run("docker", {"exec", container, "cat", path}, 8000);
         if (out.trimmed().isEmpty())
             out = "Journal vide ou absent : " + path;
     }
@@ -652,7 +872,54 @@ void LiteIdeAfPlugin::editSystemPrompt()
         return;
     if (QMessageBox::question(m_app->mainWindow(), "AgentPlurAI", "Écrire ce system prompt dans le YAML ?") != QMessageBox::Yes)
         return;
-    info("Révision proposée, non fusionnée automatiquement.\nEnregistre le bloc à la main dans " + contractPath() + "\n\n" + next);
+
+    const QString path = contractPath();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        warn("YAML illisible : " + path);
+        return;
+    }
+    QString text = QString::fromUtf8(f.readAll());
+    f.close();
+    QString folded = "systemPrompt: |\n";
+    for (const QString &row : next.split('\n'))
+        folded += "  " + row + "\n";
+    const QRegularExpression block("(^|\\n)([ \\t]*)systemPrompt:\\s*\\|[\\s\\S]*?(?=\\n[^ \\t\\n]|\\n*$)");
+    if (which == "global") {
+        const int at = text.indexOf("systemPrompt:");
+        if (at < 0) {
+            warn("systemPrompt global absent.");
+            return;
+        }
+        const int end = text.indexOf("\nengines:", at);
+        if (end < 0) {
+            warn("Bloc engines absent, fusion annulée.");
+            return;
+        }
+        text.replace(at, end - at, folded);
+    } else {
+        const QString needle = "- name: " + which;
+        const int at = text.indexOf(needle);
+        if (at < 0) {
+            warn("Moteur absent : " + which);
+            return;
+        }
+        const int prompt = text.indexOf("systemPrompt:", at);
+        if (prompt < 0) {
+            warn("systemPrompt local absent.");
+            return;
+        }
+        const int nextName = text.indexOf("\n  - name:", prompt);
+        const int end = nextName < 0 ? text.size() : nextName;
+        text.replace(prompt, end - prompt, folded.trimmed() + "\n");
+    }
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        warn("YAML non écrivable : " + path);
+        return;
+    }
+    f.write(text.toUtf8());
+    f.flush();
+    info("System prompt écrit dans " + path);
 }
 
 void LiteIdeAfPlugin::showQuota()
@@ -661,7 +928,12 @@ void LiteIdeAfPlugin::showQuota()
         info("dryRun : quota non interrogé.");
         return;
     }
-    const QString out = run("docker", {"exec", activeCline(), "cline", "auth"}, 15000);
+    const QString container = blockValue(engineBlock(activeCline()), "container");
+    if (container.isEmpty()) {
+        warn("Pas de clé container pour le moteur actif.");
+        return;
+    }
+    const QString out = run("docker", {"exec", container, "cline", "auth"}, 15000);
     info("Sortie locale de Cline (pas la console Z.ai) :\n" + out);
 }
 
@@ -675,7 +947,12 @@ void LiteIdeAfPlugin::reloadWrites()
         warn("Tampon sale : rechargement refusé.");
         return;
     }
-    const QString journal = run("docker", {"exec", activeCline(), "cat", containerRoot() + "/.agentplurai/actions.log"}, 8000);
+    const QString container = blockValue(engineBlock(activeCline()), "container");
+    if (container.isEmpty()) {
+        warn("Pas de clé container pour le moteur actif.");
+        return;
+    }
+    const QString journal = run("docker", {"exec", container, "cat", containerRoot() + "/.agentplurai/actions.log"}, 8000);
     QStringList files;
     const QRegularExpression re("write\\s+(\\S+)");
     QRegularExpressionMatchIterator it = re.globalMatch(journal);

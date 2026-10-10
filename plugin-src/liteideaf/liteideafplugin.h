@@ -26,6 +26,7 @@ private slots:
     void showQuota();
     void reloadWrites();
     void setDefaultAI();
+    void alignProject();
     void onOllamaFinished();
     void onClineFinished(int code, int status);
 
@@ -54,6 +55,10 @@ private:
     QString hostRoot() const;
     QString containerRoot() const;
     QString scopeText() const;
+    QString currentProjectRoot() const;
+    QString declaredHost() const;
+    bool updateDeclaredHost(const QString &host);
+    bool recreateContainer(const QString &host);
     bool editorDirty() const;
     bool gitDirty(const QString &root) const;
     QString run(const QString &program, const QStringList &args, int timeoutMs, int *code = nullptr) const;
