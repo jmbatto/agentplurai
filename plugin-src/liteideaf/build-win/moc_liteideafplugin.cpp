@@ -50,7 +50,11 @@ template <> constexpr inline auto LiteIdeAfPlugin::qt_create_metaobjectdata<qt_m
         "showJournal",
         "showQuota",
         "reloadWrites",
-        "setDefaultAI"
+        "setDefaultAI",
+        "onOllamaFinished",
+        "onClineFinished",
+        "code",
+        "status"
     };
 
     QtMocHelpers::UintData qt_methods {
@@ -72,6 +76,12 @@ template <> constexpr inline auto LiteIdeAfPlugin::qt_create_metaobjectdata<qt_m
         QtMocHelpers::SlotData<void()>(9, 2, QMC::AccessPrivate, QMetaType::Void),
         // Slot 'setDefaultAI'
         QtMocHelpers::SlotData<void()>(10, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'onOllamaFinished'
+        QtMocHelpers::SlotData<void()>(11, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'onClineFinished'
+        QtMocHelpers::SlotData<void(int, int)>(12, 2, QMC::AccessPrivate, QMetaType::Void, {{
+            { QMetaType::Int, 13 }, { QMetaType::Int, 14 },
+        }}),
     };
     QtMocHelpers::UintData qt_properties {
     };
@@ -104,10 +114,11 @@ void LiteIdeAfPlugin::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int 
         case 6: _t->showQuota(); break;
         case 7: _t->reloadWrites(); break;
         case 8: _t->setDefaultAI(); break;
+        case 9: _t->onOllamaFinished(); break;
+        case 10: _t->onClineFinished((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2]))); break;
         default: ;
         }
     }
-    (void)_a;
 }
 
 const QMetaObject *LiteIdeAfPlugin::metaObject() const
@@ -129,14 +140,14 @@ int LiteIdeAfPlugin::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 9)
+        if (_id < 11)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 9;
+        _id -= 11;
     }
     if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 9)
+        if (_id < 11)
             *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType();
-        _id -= 9;
+        _id -= 11;
     }
     return _id;
 }

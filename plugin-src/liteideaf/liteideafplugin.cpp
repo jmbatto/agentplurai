@@ -5,8 +5,8 @@
 #include <QAction>
 #include <QApplication>
 #include <QDateTime>
+#include <QDialog>
 #include <QDialogButtonBox>
-#include <QRadioButton>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
@@ -21,8 +21,10 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
+#include <QRadioButton>
 #include <QRegularExpression>
 #include <QTextEdit>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -108,6 +110,11 @@ void splitCline(const QString &raw, QString *response, QString *thinking)
 LiteIdeAfPlugin::LiteIdeAfPlugin()
     : m_defaultEngine()
     , m_loadingDialog(nullptr)
+    , m_loadingLabel(nullptr)
+    , m_elapsedTimer(nullptr)
+    , m_elapsedSeconds(0)
+    , m_pendingReply(nullptr)
+    , m_pendingProcess(nullptr)
     , m_app(nullptr)
 {
 }
@@ -115,27 +122,46 @@ LiteIdeAfPlugin::LiteIdeAfPlugin()
 void LiteIdeAfPlugin::showLoadingDialog(const QString &engine)
 {
     if (m_loadingDialog)
-        return;
+        hideLoadingDialog();
+    m_elapsedSeconds = 0;
     m_loadingDialog = new QDialog(m_app->mainWindow());
-    m_loadingDialog->setWindowTitle("AgentPlurAI");
-    m_loadingDialog->setWindowModality(Qt::WindowModal);
+    m_loadingDialog->setWindowTitle("AgentPlurAI — en cours");
+    m_loadingDialog->setWindowModality(Qt::NonModal);
+    m_loadingDialog->setAttribute(Qt::WA_DeleteOnClose, false);
     auto *layout = new QVBoxLayout(m_loadingDialog);
-    auto *label = new QLabel("Envoi du prompt au moteur : " + engine + "\nVeuillez patienter...", m_loadingDialog);
-    label->setAlignment(Qt::AlignCenter);
-    layout->addWidget(label);
-    m_loadingDialog->resize(360, 100);
-    m_loadingDialog->open();
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    m_loadingLabel = new QLabel(m_loadingDialog);
+    m_loadingLabel->setAlignment(Qt::AlignCenter);
+    m_loadingLabel->setText("Moteur : " + engine + "\nÉcoulé : 0 s");
+    layout->addWidget(m_loadingLabel);
+    m_loadingDialog->resize(320, 90);
+    m_loadingDialog->show();
+    m_loadingDialog->raise();
+    if (!m_elapsedTimer) {
+        m_elapsedTimer = new QTimer(this);
+        connect(m_elapsedTimer, &QTimer::timeout, this, &LiteIdeAfPlugin::updateElapsed);
+    }
+    m_elapsedTimer->start(1000);
+}
+
+void LiteIdeAfPlugin::updateElapsed()
+{
+    if (!m_loadingLabel)
+        return;
+    ++m_elapsedSeconds;
+    const QString engine = m_pendingEngine.isEmpty() ? QString("…") : m_pendingEngine;
+    m_loadingLabel->setText("Moteur : " + engine + "\nÉcoulé : " + QString::number(m_elapsedSeconds) + " s");
 }
 
 void LiteIdeAfPlugin::hideLoadingDialog()
 {
-    if (!m_loadingDialog)
-        return;
-    m_loadingDialog->close();
-    m_loadingDialog->deleteLater();
-    m_loadingDialog = nullptr;
-    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+    if (m_elapsedTimer)
+        m_elapsedTimer->stop();
+    if (m_loadingDialog) {
+        m_loadingDialog->close();
+        m_loadingDialog->deleteLater();
+        m_loadingDialog = nullptr;
+        m_loadingLabel = nullptr;
+    }
 }
 
 QString LiteIdeAfPlugin::contractPath() const
@@ -464,6 +490,9 @@ void LiteIdeAfPlugin::sendPrompt()
         return;
     }
 
+    m_pendingEngine = engine;
+    m_pendingBlock = block;
+
     const bool model = blockValue(block, "kind") == "model" || !blockValue(block, "endpoint").isEmpty();
     if (model) {
         showLoadingDialog(engine);
@@ -472,32 +501,11 @@ void LiteIdeAfPlugin::sendPrompt()
         msg["model"] = blockValue(block, "model").isEmpty() ? "qwen2.5" : blockValue(block, "model");
         msg["stream"] = false;
         msg["prompt"] = body;
-        QNetworkAccessManager nam;
+        auto *nam = new QNetworkAccessManager(this);
         QNetworkRequest req(QUrl(ep + "/api/generate"));
         req.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-        QNetworkReply *reply = nam.post(req, QJsonDocument(msg).toJson());
-        QEventLoop loop;
-        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-        loop.exec();
-        const QByteArray raw = reply->readAll();
-        const bool netOk = reply->error() == QNetworkReply::NoError;
-        const QString netErr = reply->errorString();
-        reply->deleteLater();
-        hideLoadingDialog();
-        if (!netOk) {
-            warn(netErr);
-            return;
-        }
-        const QString answer = QString::fromUtf8(raw);
-        QJsonParseError parseError;
-        const QJsonDocument jsonDoc = QJsonDocument::fromJson(answer.toUtf8(), &parseError);
-        QString responseText = answer;
-        QString thinkingText;
-        if (parseError.error == QJsonParseError::NoError && jsonDoc.isObject()) {
-            responseText = jsonDoc.object().value("response").toString();
-            thinkingText = jsonDoc.object().value("thinking").toString();
-        }
-        showAnswer(engine, block, responseText, thinkingText);
+        m_pendingReply = nam->post(req, QJsonDocument(msg).toJson());
+        connect(m_pendingReply, &QNetworkReply::finished, this, &LiteIdeAfPlugin::onOllamaFinished);
         return;
     }
 
@@ -511,14 +519,12 @@ void LiteIdeAfPlugin::sendPrompt()
     const QString inBox = "/tmp/agentplurai-prompt.txt";
     const QString logDir = containerRoot() + "/.agentplurai";
     run("docker", {"exec", container, "mkdir", "-p", logDir}, 8000);
-    QProcess p;
-    p.start("docker", {"exec", "-i", container, "tee", inBox});
-    p.waitForStarted(5000);
-    p.write(body.toUtf8());
-    p.closeWriteChannel();
-    p.waitForFinished(8000);
-    const QString script = "prompt=$(cat " + inBox + "); exec cline \"$prompt\"";
-    const QString out = run("docker", {"exec", "-w", containerRoot(), container, "bash", "-lc", script}, 120000);
+    QProcess tee;
+    tee.start("docker", {"exec", "-i", container, "tee", inBox});
+    tee.waitForStarted(5000);
+    tee.write(body.toUtf8());
+    tee.closeWriteChannel();
+    tee.waitForFinished(8000);
     const QString log = logDir + "/prompts.log";
     const QString line = QDateTime::currentDateTimeUtc().toString(Qt::ISODate) + " " + engine + "\n" + task + "\n";
     QProcess logp;
@@ -527,11 +533,52 @@ void LiteIdeAfPlugin::sendPrompt()
     logp.write(line.toUtf8());
     logp.closeWriteChannel();
     logp.waitForFinished(8000);
+
+    const QString script = "prompt=$(cat " + inBox + "); exec cline \"$prompt\"";
+    m_pendingProcess = new QProcess(this);
+    connect(m_pendingProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, &LiteIdeAfPlugin::onClineFinished);
+    m_pendingProcess->start("docker", {"exec", "-w", containerRoot(), container, "bash", "-lc", script});
+}
+
+void LiteIdeAfPlugin::onOllamaFinished()
+{
+    if (!m_pendingReply)
+        return;
+    const QByteArray raw = m_pendingReply->readAll();
+    const bool netOk = m_pendingReply->error() == QNetworkReply::NoError;
+    const QString netErr = m_pendingReply->errorString();
+    m_pendingReply->deleteLater();
+    m_pendingReply = nullptr;
+    hideLoadingDialog();
+    if (!netOk) {
+        warn(netErr);
+        return;
+    }
+    const QString answer = QString::fromUtf8(raw);
+    QJsonParseError parseError;
+    const QJsonDocument jsonDoc = QJsonDocument::fromJson(answer.toUtf8(), &parseError);
+    QString responseText = answer;
+    QString thinkingText;
+    if (parseError.error == QJsonParseError::NoError && jsonDoc.isObject()) {
+        responseText = jsonDoc.object().value("response").toString();
+        thinkingText = jsonDoc.object().value("thinking").toString();
+    }
+    showAnswer(m_pendingEngine, m_pendingBlock, responseText, thinkingText);
+}
+
+void LiteIdeAfPlugin::onClineFinished(int, int)
+{
+    if (!m_pendingProcess)
+        return;
+    const QString out = QString::fromUtf8(m_pendingProcess->readAllStandardOutput() + m_pendingProcess->readAllStandardError());
+    m_pendingProcess->deleteLater();
+    m_pendingProcess = nullptr;
     hideLoadingDialog();
     QString response;
     QString thinking;
     splitCline(out, &response, &thinking);
-    showAnswer(engine, block, response.isEmpty() ? "Cline sans sortie" : response, thinking);
+    showAnswer(m_pendingEngine, m_pendingBlock, response.isEmpty() ? "Cline sans sortie" : response, thinking);
 }
 
 void LiteIdeAfPlugin::showHistory()

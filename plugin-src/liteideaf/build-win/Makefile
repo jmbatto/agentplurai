@@ -1046,17 +1046,15 @@ liteideafplugin.o: ../liteideafplugin.cpp ../liteideafplugin.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QApplication \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qapplication.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QDateTime \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QDialog \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qdialog.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QDialogButtonBox \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qdialogbuttonbox.h \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QRadioButton \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qradiobutton.h \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qabstractbutton.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QEventLoop \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QFile \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QInputDialog \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qinputdialog.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qlineedit.h \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qdialog.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QJsonDocument \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qjsondocument.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qjsonparseerror.h \
@@ -1102,8 +1100,13 @@ liteideafplugin.o: ../liteideafplugin.cpp ../liteideafplugin.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtNetwork/QNetworkRequest \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QProcess \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qprocess.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QRadioButton \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qradiobutton.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qabstractbutton.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QRegularExpression \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QTextEdit \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QTimer \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qtimer.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QVBoxLayout \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qboxlayout.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qlayout.h \

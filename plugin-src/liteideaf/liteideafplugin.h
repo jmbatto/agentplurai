@@ -4,6 +4,10 @@
 #include "liteapi/liteapi.h"
 
 class QDialog;
+class QLabel;
+class QTimer;
+class QNetworkReply;
+class QProcess;
 
 class LiteIdeAfPlugin : public LiteApi::IPlugin
 {
@@ -22,12 +26,23 @@ private slots:
     void showQuota();
     void reloadWrites();
     void setDefaultAI();
+    void onOllamaFinished();
+    void onClineFinished(int code, int status);
 
 private:
     QString m_defaultEngine;
     QDialog *m_loadingDialog;
+    QLabel *m_loadingLabel;
+    QTimer *m_elapsedTimer;
+    int m_elapsedSeconds;
+    QString m_pendingEngine;
+    QString m_pendingBlock;
+    QNetworkReply *m_pendingReply;
+    QProcess *m_pendingProcess;
+
     void showLoadingDialog(const QString &engine);
     void hideLoadingDialog();
+    void updateElapsed();
     QString contractPath() const;
     QString yamlText() const;
     bool dryRun() const;
@@ -62,7 +77,7 @@ public:
         m_info->setName("LiteIDE AgentPlurAI");
         m_info->setAuthor("JM Batto");
         m_info->setVer("0.1");
-        m_info->setInfo("Mutiple AI assistant");
+        m_info->setInfo("Multiple AI assistant");
         m_info->appendDepend("plugin/liteeditor");
     }
 };
