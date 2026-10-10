@@ -11,7 +11,7 @@ name: cline-project
 services:
   cline-project:
     build: .
-    image: cline-project:go1.26.7
+    image: cline-project:go1.27.2
     container_name: cline-project
     stdin_open: true
     tty: true
