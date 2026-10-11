@@ -1,10 +1,3 @@
-# Windows tree: ./dist/bin/liteide.exe
-# Plugin sources: ./plugin-src  (edited by Cline inside plugin-dev)
-#
-#   docker compose build export
-#   docker compose run --rm export
-#   docker compose run --rm plugin-dev
-
 name: liteide-win
 
 x-build: &build
@@ -29,7 +22,8 @@ services:
     working_dir: /dist
     restart: "no"
 
-  plugin-dev:
+  # Normalisation du nom de l'adaptateur Windows
+  plugin-dev-windows:
     build:
       <<: *build
       target: dev
@@ -38,8 +32,6 @@ services:
     stdin_open: true
     tty: true
     environment:
-      CLINE_TELEMETRY_DISABLED: "true"
-      DO_NOT_TRACK: "1"
       LITEIDEX: /src/liteide/liteidex
       PLUGIN_DIR: /work/plugin-src/liteideaf
       DIST: /dist
@@ -50,7 +42,26 @@ services:
       - type: bind
         source: ./dist
         target: /dist
+    restart: "no"
+
+  # Adaptateur Linux natif
+  plugin-dev-linux:
+    build:
+      <<: *build
+      target: linux-dev
+    image: liteide-linux-dev:qt6
+    working_dir: /work
+    stdin_open: true
+    tty: true
+    environment:
+      LITEIDEX: /src/liteide/liteidex
+      PLUGIN_DIR: /work/plugin-src/liteideaf
+      DIST: /dist
+    volumes:
       - type: bind
-        source: ./cline-config
-        target: /root/.cline
+        source: ./plugin-src
+        target: /work/plugin-src
+      - type: bind
+        source: ./dist-linux
+        target: /dist
     restart: "no"
