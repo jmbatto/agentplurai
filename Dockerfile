@@ -119,8 +119,8 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash ca-certificates curl git make \
         build-essential cmake \
-        qt6-base-dev qt6-tools-dev qt6-l10n-tools \
-        libpcre2-dev wget \
+        qt6-base-dev qt6-tools-dev qt6-l10n-tools qt6-5compat-dev qt6-svg-dev \
+        libpcre2-dev pkg-config wget \
     && rm -rf /var/lib/apt/lists/* \
     && if [ "${JOBS}" = "auto" ] || [ -z "${JOBS}" ]; then \
          JOBS="$(awk '/^physical id/ {p=$$4} /^core id/ {print p","$$4}' /proc/cpuinfo | sort -u | wc -l)"; \
@@ -161,8 +161,8 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 LANGUAGE=C.UTF-8 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
         bash ca-certificates curl git make \
         build-essential cmake \
-        qt6-base-dev qt6-tools-dev qt6-l10n-tools \
-        libpcre2-16-0 libpcre2-dev \
+        qt6-base-dev qt6-tools-dev qt6-l10n-tools qt6-5compat-dev qt6-svg-dev \
+        libpcre2-16-0 libpcre2-dev pkg-config \
     && rm -rf /var/lib/apt/lists/* \
     && command -v qmake6 \
     && test -x "${QMAKE_WIN}"
