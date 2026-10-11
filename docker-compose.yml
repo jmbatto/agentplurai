@@ -1,62 +1,70 @@
+# Une image, deux distributions.
+#   docker compose build plugin-dev
+#   docker compose run --rm plugin-dev build-plugin.sh
+#   docker compose run --rm plugin-dev build-plugin-linux.sh
+#   docker compose run --rm export-windows
+#   docker compose run --rm export-linux
+
 name: liteide-win
 
 x-build: &build
   context: .
   dockerfile: Dockerfile
   args:
-    JOBS: "8"
+    JOBS: "${JOBS:-auto}"
     GOPROXY: https://proxy.golang.org,direct
 
-services:
-  export:
-    build:
-      <<: *build
-      target: runtime
-    image: liteide-win-export:qt6
-    volumes:
-      - type: bind
-        source: ./dist
-        target: /dist
-        bind:
-          create_host_path: true
-    working_dir: /dist
-    restart: "no"
+x-dev: &dev
+  build:
+    <<: *build
+    target: dev
+  image: liteide-dev:qt6
+  working_dir: /work
+  stdin_open: true
+  tty: true
+  environment:
+    LITEIDEX: /src/liteide/liteidex
+    PLUGIN_DIR: /work/plugin-src/liteideaf
+    LITEIDE_WIN: /opt/liteide-dist-win
+    LITEIDE_LINUX: /opt/liteide-dist-linux
+    QMAKE_WIN: /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/bin/qmake
+    QMAKE_LINUX: qmake6
+  volumes:
+    - type: bind
+      source: ./plugin-src
+      target: /work/plugin-src
+  restart: "no"
 
-  # Normalisation du nom de l'adaptateur Windows
-  plugin-dev-windows:
-    build:
-      <<: *build
-      target: dev
-    image: liteide-win-dev:qt6
-    working_dir: /work
-    stdin_open: true
-    tty: true
+services:
+  plugin-dev:
+    <<: *dev
+
+  export-windows:
+    <<: *dev
+    working_dir: /dist
     environment:
-      LITEIDEX: /src/liteide/liteidex
-      PLUGIN_DIR: /work/plugin-src/liteideaf
       DIST: /dist
+      REQUIRE_PLUGIN: "1"
+      LITEIDE_WIN: /opt/liteide-dist-win
     volumes:
       - type: bind
         source: ./plugin-src
         target: /work/plugin-src
       - type: bind
-        source: ./dist
+        source: ./dist-win
         target: /dist
-    restart: "no"
+        bind:
+          create_host_path: true
+    entrypoint: ["/usr/local/bin/distribute.sh"]
+    command: ["windows"]
 
-  # Adaptateur Linux natif
-  plugin-dev-linux:
-    build:
-      <<: *build
-      target: linux-dev
-    image: liteide-linux-dev:qt6
-    working_dir: /work
-    stdin_open: true
-    tty: true
+  export-linux:
+    <<: *dev
+    working_dir: /dist
     environment:
-      LITEIDEX: /src/liteide/liteidex
-      PLUGIN_DIR: /work/plugin-src/liteideaf
       DIST: /dist
+      REQUIRE_PLUGIN: "1"
+      LITEIDE_LINUX: /opt/liteide-dist-linux
     volumes:
       - type: bind
         source: ./plugin-src
@@ -64,4 +72,7 @@ services:
       - type: bind
         source: ./dist-linux
         target: /dist
-    restart: "no"
+        bind:
+          create_host_path: true
+    entrypoint: ["/usr/local/bin/distribute.sh"]
+    command: ["linux"]

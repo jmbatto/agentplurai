@@ -71,7 +71,7 @@ fi
 
 cd "${LITEIDE_ROOT}"
 # terminal.dll : -llibvterm (qtLibraryName(libvterm)) → ld MinGW cherche liblibvterm.
-# Plugin hors besoin pour valider liteide.exe + agentplurai.
+# Plugin hors besoin pour valider liteide.exe + AgentField.
 if [[ -f src/plugins/plugins.pro ]]; then
   sed -i -E '/^[[:space:]]*terminal[[:space:]]*(\\?)$/d' src/plugins/plugins.pro
 fi
