@@ -2,8 +2,8 @@
 #   docker compose build plugin-dev
 #   docker compose run --rm plugin-dev build-plugin.sh
 #   docker compose run --rm plugin-dev build-plugin-linux.sh
-#   docker compose run --rm export-windows
-#   docker compose run --rm export-linux
+#   docker compose --profile export run --rm export-windows
+#   docker compose --profile export run --rm export-linux
 
 name: liteide-win
 
@@ -39,8 +39,12 @@ services:
   plugin-dev:
     <<: *dev
 
+  # Profil séparé : `up` ne les lance pas. Le plugin n'existe pas encore
+  # au premier démarrage, distribute.sh échouerait.
+  #   docker compose --profile export run --rm export-windows
   export-windows:
     <<: *dev
+    profiles: ["export"]
     working_dir: /dist
     environment:
       DIST: /dist
@@ -60,6 +64,7 @@ services:
 
   export-linux:
     <<: *dev
+    profiles: ["export"]
     working_dir: /dist
     environment:
       DIST: /dist
