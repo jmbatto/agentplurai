@@ -66,6 +66,27 @@ if [[ "${REQUIRE_PLUGIN}" == "1" ]]; then
   test -f "${DIST}/lib/liteide/plugins/${PLUGIN_NAME}"
 fi
 
+# Linux : le binaire est lié à libliteapp.so.1, qui n'est pas dans le
+# chemin de recherche par défaut. On renomme le binaire et on pose un
+# lanceur qui fixe LD_LIBRARY_PATH avant l'exec.
+if [[ "${TARGET}" == "linux" ]]; then
+  LIBDIR="${DIST}/lib/liteide"
+  if [[ -f "${LIBDIR}/libliteapp.so" && ! -e "${LIBDIR}/libliteapp.so.1" ]]; then
+    ln -s libliteapp.so "${LIBDIR}/libliteapp.so.1"
+  fi
+  if [[ -f "${LIBDIR}/libliteapp.so" && ! -e "${LIBDIR}/libliteapp.so.1.0" ]]; then
+    ln -s libliteapp.so "${LIBDIR}/libliteapp.so.1.0"
+  fi
+  mv "${DIST}/bin/liteide" "${DIST}/bin/liteide.bin"
+  cat > "${DIST}/bin/liteide" <<'EOF'
+#!/bin/sh
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export LD_LIBRARY_PATH="${ROOT}/lib/liteide${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+exec "${ROOT}/bin/liteide.bin" "$@"
+EOF
+  chmod 755 "${DIST}/bin/liteide" "${DIST}/bin/liteide.bin"
+fi
+
 echo "== distribution ${TARGET} =="
 echo "IDE  ${DIST}/${IDE_BIN}"
 if [[ -n "${PLUGIN_SRC}" ]]; then
