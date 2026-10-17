@@ -22,7 +22,7 @@ services:
     build:
       <<: *build
       target: dev
-    image: liteide-dev:qt6
+    image: liteide-dev-windows:qt6
     working_dir: /work
     stdin_open: true
     tty: true
@@ -53,7 +53,7 @@ services:
     restart: "no"
 
   export:
-    image: liteide-dev:qt6
+    image: liteide-dev-windows:qt6
     working_dir: /dist
     environment:
       DIST: /dist

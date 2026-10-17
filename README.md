@@ -5,8 +5,8 @@ One image, two deliveries. The image holds the MinGW toolchain and the native Qt
 ```text
 liteide-windows-docker/
   Dockerfile
-  docker-compose.windows.yml   -> ./dist-win
-  docker-compose.linux.yml     -> ./dist-linux
+  docker-compose.windows.yml   -> image liteide-dev-windows:qt6 -> ./dist-win
+  docker-compose.linux.yml     -> image liteide-dev-linux:qt6  -> ./dist-linux
   build-windows.sh             LiteIDE cross-build
   build-linux.sh               LiteIDE native build
   build-macos.sh               LiteIDE native, run on a Mac

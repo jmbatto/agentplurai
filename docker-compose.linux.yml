@@ -21,16 +21,18 @@ services:
   plugin:
     build:
       <<: *build
-      target: dev
-    image: liteide-dev:qt6
+      target: dev-linux
+    image: liteide-dev-linux:qt6
     working_dir: /work
     stdin_open: true
     tty: true
     environment:
       LITEIDEX: /src/liteide-linux/liteidex
       PLUGIN_DIR: /work/plugin-src/liteideaf
-      QMAKE: qmake6
+      QMAKE: /usr/bin/qmake6
       DIST: /dist
+      PKG_CONFIG_PATH: /usr/lib/x86_64-linux-gnu/pkgconfig
+      PATH: /usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
     volumes:
       - type: bind
         source: ./plugin-src
@@ -53,7 +55,7 @@ services:
     restart: "no"
 
   export:
-    image: liteide-dev:qt6
+    image: liteide-dev-linux:qt6
     working_dir: /dist
     environment:
       DIST: /dist

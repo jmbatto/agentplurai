@@ -182,3 +182,37 @@ RUN chmod +x /usr/local/bin/build-plugin.sh \
 
 WORKDIR /work
 CMD ["bash", "-lc", "test -d /work/plugin-src || cp -a /opt/plugin-skel/. /work/plugin-src/; exec bash"]
+
+# ---------------------------------------------------------------------------
+# Chemin Linux. Pas de MXE dans le PATH : qmake6 ne lie que le Qt Debian.
+FROM build-linux AS dev-linux
+
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 LANGUAGE=C.UTF-8 \
+    DEBIAN_FRONTEND=noninteractive \
+    HOME=/root \
+    LITEIDEX=/src/liteide-linux/liteidex \
+    LITEIDE_LINUX=/opt/liteide-dist-linux \
+    QMAKE=/usr/bin/qmake6 \
+    QMAKE_LINUX=/usr/bin/qmake6 \
+    GOTOOLCHAIN=local \
+    PATH="/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig"
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        bash ca-certificates \
+        build-essential \
+        qt6-base-dev qt6-tools-dev qt6-l10n-tools qt6-5compat-dev qt6-svg-dev \
+        libpcre2-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && command -v qmake6 \
+    && qmake6 -query QT_VERSION
+
+COPY build-plugin-linux.sh /usr/local/bin/build-plugin-linux.sh
+COPY distribute.sh /usr/local/bin/distribute.sh
+COPY plugin-src /opt/plugin-skel
+RUN chmod +x /usr/local/bin/build-plugin-linux.sh /usr/local/bin/distribute.sh \
+    && mkdir -p /work /opt/plugins-linux \
+    && test -x /opt/liteide-dist-linux/bin/liteide
+
+WORKDIR /work
+CMD ["bash", "-lc", "test -d /work/plugin-src || cp -a /opt/plugin-skel/. /work/plugin-src/; exec bash"]
