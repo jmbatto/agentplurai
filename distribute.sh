@@ -122,10 +122,17 @@ if [[ "${TARGET}" == "linux" ]]; then
   }
   ldd "${DIST}/bin/liteide" | awk '/=>/ { print $3 }' | while read -r so; do
     case "${so}" in
-      *libQt6*|*libicu*|*libpcre2*|*libdouble-conversion*|*libb2*|*libmd4c*)
+      *libQt6*|*libicu*|*libpcre2*|*libdouble-conversion*|*libb2*|*libmd4c*|*libxcb*|*libxkb*)
         copy_so "${so}"
         ;;
     esac
+  done
+  # libqxcb charge d'autres Qt/xcb que le binaire ne référence pas.
+  for so in /usr/lib/x86_64-linux-gnu/libQt6*.so.6 \
+            /usr/lib/x86_64-linux-gnu/libicu*.so.* \
+            /usr/lib/x86_64-linux-gnu/libxcb*.so.* \
+            /usr/lib/x86_64-linux-gnu/libxkbcommon*.so.*; do
+    [[ -e "${so}" ]] && copy_so "${so}"
   done
   for plug in /usr/lib/x86_64-linux-gnu/qt6/plugins/platforms/libqxcb.so \
               /usr/lib/qt6/plugins/platforms/libqxcb.so; do
@@ -159,6 +166,7 @@ EOF
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export LD_LIBRARY_PATH="${ROOT}/lib/liteide:${ROOT}/lib/qt6${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 export QT_PLUGIN_PATH="${ROOT}/plugins"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 export LITEIDE_RES_PATH="${ROOT}/share/liteide"
 export LITEIDE_PLUGIN_PATH="${ROOT}/lib/liteide/plugins"
 exec "${ROOT}/bin/liteide.bin" "$@"
