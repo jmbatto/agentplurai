@@ -14,9 +14,8 @@ case "${TARGET}" in
     IDE_BIN="bin/liteide.exe"
     PLUGIN_NAME="liteideaf.dll"
     PLUGIN_CANDIDATES=(
-      "${PLUGIN_WIN:-/opt/plugins-win/liteideaf.dll}"
       "/work/plugin-src/liteideaf/build-win/liteideaf.dll"
-      "/dist-win/lib/liteide/plugins/liteideaf.dll"
+      "${PLUGIN_WIN:-/opt/plugins-win/liteideaf.dll}"
     )
     ;;
   linux)
@@ -24,9 +23,9 @@ case "${TARGET}" in
     IDE_BIN="bin/liteide"
     PLUGIN_NAME="libliteideaf.so"
     PLUGIN_CANDIDATES=(
-      "${PLUGIN_LINUX:-/opt/plugins-linux/libliteideaf.so}"
       "/work/plugin-src/liteideaf/build-linux/libliteideaf.so"
       "/work/plugin-src/liteideaf/build-linux/libliteideaf.so.1"
+      "${PLUGIN_LINUX:-/opt/plugins-linux/libliteideaf.so}"
     )
     ;;
   *)

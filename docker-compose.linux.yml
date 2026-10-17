@@ -36,6 +36,9 @@ services:
         target: /dist
         bind:
           create_host_path: true
+      - type: bind
+        source: ./build-plugin-linux.sh
+        target: /usr/local/bin/build-plugin-linux.sh
     command: ["build-plugin-linux.sh"]
     restart: "no"
 
@@ -55,6 +58,9 @@ services:
         target: /dist
         bind:
           create_host_path: true
+      - type: bind
+        source: ./distribute.sh
+        target: /usr/local/bin/distribute.sh
     entrypoint: ["/usr/local/bin/distribute.sh"]
     command: ["linux"]
     restart: "no"

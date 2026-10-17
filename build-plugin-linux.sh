@@ -5,7 +5,7 @@ set -euo pipefail
 
 : "${QMAKE:=qmake6}"
 PLUGIN_DIR="${PLUGIN_DIR:-/work/plugin-src/liteideaf}"
-LITEIDEX="${LITEIDEX:-/src/liteide/liteidex}"
+LITEIDEX="${LITEIDEX:-/src/liteide-linux/liteidex}"
 DIST="${DIST:-/dist}"
 OUT="${PLUGIN_DIR}/build-linux"
 
@@ -30,25 +30,22 @@ cd "${OUT}"
     "IDE_PLUGIN_PATH=${DIST}/lib/liteide/plugins"
 make -j"${JOBS:-$(nproc)}"
 
-# DESTDIR pose le .so dans /dist (éphémère). On le copie aussi dans le
-# répertoire de build, monté depuis l'hôte, pour que distribute.sh le trouve.
-SO=""
-for candidate in \
-    "${DIST}/lib/liteide/plugins/libliteideaf.so" \
-    "${OUT}/libliteideaf.so" \
-    "${OUT}/libliteideaf.so.1"
-do
-  if [[ -e "${candidate}" ]]; then
-    SO="${candidate}"
-    break
-  fi
-done
-if [[ -z "${SO}" ]]; then
-  SO="$(find "${DIST}/lib/liteide/plugins" "${OUT}" -name 'libliteideaf.so*' -type f 2>/dev/null | head -n 1 || true)"
-fi
+# qmake plugin_with_soname peut poser libliteideaf.so, .so.1 ou .so.1.0.0,
+# parfois uniquement un lien. On cherche large, liens compris.
+SO="$(find "${DIST}" "${OUT}" "${PLUGIN_DIR}" \
+        \( -name 'libliteideaf.so' -o -name 'libliteideaf.so.*' -o -name 'liteideaf.so' \) \
+        2>/dev/null | head -n 1 || true)"
 if [[ -z "${SO}" ]]; then
   echo "ERROR: libliteideaf.so introuvable après le make." >&2
+  echo "-- contenu ${OUT} --" >&2
+  find "${OUT}" -maxdepth 3 -type f -o -type l 2>/dev/null | head -n 40 >&2 || true
+  echo "-- contenu ${DIST} --" >&2
+  find "${DIST}" -maxdepth 4 \( -name '*.so' -o -name '*.so.*' \) 2>/dev/null | head -n 40 >&2 || true
   exit 1
+fi
+# Si c'est un lien, copier la cible réelle pour que l'hôte ait un fichier.
+if [[ -L "${SO}" ]]; then
+  SO="$(readlink -f "${SO}")"
 fi
 mkdir -p /opt/plugins-linux
 cp -a "${SO}" "${OUT}/libliteideaf.so"
@@ -56,4 +53,4 @@ cp -a "${SO}" /opt/plugins-linux/libliteideaf.so
 
 echo "== plugin so =="
 ls -la "${OUT}/libliteideaf.so" /opt/plugins-linux/libliteideaf.so
-echo "Puis : docker compose --profile export run --rm export-linux"
+echo "Puis : docker compose -f docker-compose.linux.yml run --rm export"

@@ -35,18 +35,13 @@ cd "${OUT}"
     "IDE_PLUGIN_PATH=${DIST}/lib/liteide/plugins"
 make -j"${JOBS:-$(nproc)}"
 
-DLL=""
-for candidate in \
-    "${DIST}/lib/liteide/plugins/liteideaf.dll" \
-    "${OUT}/liteideaf.dll"
-do
-  if [[ -f "${candidate}" ]]; then
-    DLL="${candidate}"
-    break
-  fi
-done
+DLL="$(find "${DIST}" "${OUT}" "${PLUGIN_DIR}" -name 'liteideaf.dll' 2>/dev/null | head -n 1 || true)"
 if [[ -z "${DLL}" ]]; then
   echo "ERROR: liteideaf.dll introuvable après le make." >&2
+  echo "-- contenu ${OUT} --" >&2
+  find "${OUT}" -maxdepth 3 2>/dev/null | head -n 40 >&2 || true
+  echo "-- contenu ${DIST} --" >&2
+  find "${DIST}" -name '*.dll' 2>/dev/null | head -n 40 >&2 || true
   exit 1
 fi
 mkdir -p /opt/plugins-win
@@ -54,5 +49,5 @@ cp -a "${DLL}" "${OUT}/liteideaf.dll"
 cp -a "${DLL}" /opt/plugins-win/liteideaf.dll
 
 echo "== plugin dll =="
-ls -la "${OUT}/liteideaf.dll" /opt/plugins-win/liteideaf.dll
-echo "Puis : docker compose --profile export run --rm export-windows"
+ls -la "${OUT}/liteideaf.dll"
+echo "Puis : docker compose -f docker-compose.windows.yml run --rm export"
