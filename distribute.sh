@@ -66,16 +66,27 @@ if [[ "${REQUIRE_PLUGIN}" == "1" ]]; then
   test -f "${DIST}/lib/liteide/plugins/${PLUGIN_NAME}"
 fi
 
-# Linux : le binaire est lié à libliteapp.so.1, qui n'est pas dans le
-# chemin de recherche par défaut. On renomme le binaire et on pose un
-# lanceur qui fixe LD_LIBRARY_PATH avant l'exec.
+# Linux : le binaire est lié à libliteapp.so.1. La livraison ne contient
+# souvent que le lien libliteapp.so. On récupère la cible réelle dans
+# l'arbre de build, puis on pose le lanceur.
 if [[ "${TARGET}" == "linux" ]]; then
   LIBDIR="${DIST}/lib/liteide"
-  if [[ -f "${LIBDIR}/libliteapp.so" && ! -e "${LIBDIR}/libliteapp.so.1" ]]; then
-    ln -s libliteapp.so "${LIBDIR}/libliteapp.so.1"
+  SRC_LIB="/src/liteide-linux/liteidex/liteide/lib/liteide"
+  shopt -s nullglob
+  for lib in "${SRC_LIB}"/libliteapp.so*; do
+    cp -a "${lib}" "${LIBDIR}/"
+  done
+  shopt -u nullglob
+  if [[ -L "${LIBDIR}/libliteapp.so" && ! -e "${LIBDIR}/libliteapp.so" ]]; then
+    if [[ -f "${SRC_LIB}/libliteapp.so" ]]; then
+      cp -aL "${SRC_LIB}/libliteapp.so" "${LIBDIR}/libliteapp.so.1"
+      ln -sf libliteapp.so.1 "${LIBDIR}/libliteapp.so"
+    fi
   fi
-  if [[ -f "${LIBDIR}/libliteapp.so" && ! -e "${LIBDIR}/libliteapp.so.1.0" ]]; then
-    ln -s libliteapp.so "${LIBDIR}/libliteapp.so.1.0"
+  if [[ ! -e "${LIBDIR}/libliteapp.so.1" ]]; then
+    echo "ERROR: libliteapp.so.1 absent dans ${LIBDIR} et ${SRC_LIB}" >&2
+    ls -la "${LIBDIR}" "${SRC_LIB}" 2>/dev/null || true
+    exit 1
   fi
   mv "${DIST}/bin/liteide" "${DIST}/bin/liteide.bin"
   cat > "${DIST}/bin/liteide" <<'EOF'
