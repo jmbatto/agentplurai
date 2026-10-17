@@ -25,9 +25,12 @@ fi
 mkdir -p "${OUT}" "${DIST}/lib/liteide/plugins"
 cd "${OUT}"
 "${QMAKE}" "${PLUGIN_DIR}/liteideaf.pro" \
-    "CONFIG+=release" "CONFIG-=precompile_header" \
+    "CONFIG+=release" "CONFIG+=pic" "CONFIG-=precompile_header" \
     "IDE_SOURCE_TREE=${LITEIDEX}" \
-    "IDE_PLUGIN_PATH=${DIST}/lib/liteide/plugins"
+    "IDE_PLUGIN_PATH=${DIST}/lib/liteide/plugins" \
+    "QMAKE_CFLAGS+=-fPIC -pthread -D_REENTRANT -fno-semantic-interposition" \
+    "QMAKE_CXXFLAGS+=-fPIC -pthread -D_REENTRANT -fno-semantic-interposition" \
+    "QMAKE_LFLAGS+=-fPIC -pthread -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack -Wl,--as-needed -Wl,--no-undefined"
 make -j"${JOBS:-$(nproc)}"
 
 # qmake plugin_with_soname peut poser libliteideaf.so, .so.1 ou .so.1.0.0,

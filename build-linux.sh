@@ -34,9 +34,27 @@ if [[ ! -d "${HEADERS}/QtCore5Compat" && ! -d /usr/include/x86_64-linux-gnu/qt6/
   echo "WARN: QtCore5Compat non trouvé sous ${HEADERS}. Le make échouera si le module manque." >&2
 fi
 
+# Chemin Linux uniquement. liteapi est une staticlib : sans -fPIC elle
+# ne peut pas être liée dans le .so du plugin (dangerous relocation).
+# On force PIC sur tout l'arbre, y compris les archives statiques.
+if ! grep -q 'linux-pic-for-plugins' "${LITEIDE_ROOT}/liteidex.pri"; then
+  cat >> "${LITEIDE_ROOT}/liteidex.pri" <<'EOF'
+
+# linux-pic-for-plugins
+# Archive statique destinée à un .so : PIC obligatoire, plus les flags
+# qui resteront valables sur les binutils/GCC suivants.
+CONFIG += pic
+QMAKE_CFLAGS += -fPIC -pthread -D_REENTRANT -fno-semantic-interposition
+QMAKE_CXXFLAGS += -fPIC -pthread -D_REENTRANT -fno-semantic-interposition
+QMAKE_LFLAGS += -fPIC -pthread -Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack
+EOF
+fi
+
 mkdir -p "${BUILD_ROOT}"
 cd "${BUILD_ROOT}"
-"${QMAKE}" "${LITEIDE_ROOT}" -spec linux-g++ "CONFIG+=release" "CONFIG-=precompile_header"
+"${QMAKE}" "${LITEIDE_ROOT}" -spec linux-g++ \
+    "CONFIG+=release" "CONFIG+=pic" "CONFIG-=precompile_header" \
+    "QMAKE_CFLAGS+=-fPIC" "QMAKE_CXXFLAGS+=-fPIC"
 make -j"${JOBS:-$(nproc)}"
 
 # Les .pro posent le binaire dans liteidex/liteide, parfois sous build/.
@@ -77,6 +95,9 @@ mkdir -p \
 cp -a "${BIN}" "${DIST_ROOT}/bin/liteide"
 if [[ -f "${LITEIDE_ROOT}/liteide/lib/liteide/libliteapp.so" ]]; then
   cp -a "${LITEIDE_ROOT}/liteide/lib/liteide/libliteapp.so" "${DIST_ROOT}/lib/liteide/"
+fi
+if [[ -f "${LITEIDE_ROOT}/liteide/lib/liteide/libliteapi.a" ]]; then
+  cp -a "${LITEIDE_ROOT}/liteide/lib/liteide/libliteapi.a" "${DIST_ROOT}/lib/liteide/"
 fi
 if [[ -d "${LITEIDE_ROOT}/liteide/lib/liteide/plugins" ]]; then
   cp -a "${LITEIDE_ROOT}/liteide/lib/liteide/plugins/." "${DIST_ROOT}/lib/liteide/plugins/"
