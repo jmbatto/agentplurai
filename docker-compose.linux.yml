@@ -23,7 +23,7 @@ services:
     stdin_open: true
     tty: true
     environment:
-      LITEIDEX: /src/liteide/liteidex
+      LITEIDEX: /src/liteide-linux/liteidex
       PLUGIN_DIR: /work/plugin-src/liteideaf
       QMAKE: qmake6
       DIST: /dist
