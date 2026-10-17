@@ -1,0 +1,9 @@
+dist
+dist-win
+dist-linux
+out
+.git
+*.exe
+*.dll
+*.so
+dist-mac

@@ -1,0 +1,60 @@
+# Cible Windows.
+#   docker compose -f docker-compose.windows.yml build
+#   docker compose -f docker-compose.windows.yml run --rm plugin
+#   docker compose -f docker-compose.windows.yml run --rm export
+# Résultat : ./dist-win/bin/liteide.exe et liteideaf.dll
+
+name: liteide-win
+
+x-build: &build
+  context: .
+  dockerfile: Dockerfile
+  args:
+    JOBS: "${JOBS:-auto}"
+    GOPROXY: https://proxy.golang.org,direct
+
+services:
+  plugin:
+    build:
+      <<: *build
+      target: dev
+    image: liteide-dev:qt6
+    working_dir: /work
+    stdin_open: true
+    tty: true
+    environment:
+      LITEIDEX: /src/liteide/liteidex
+      PLUGIN_DIR: /work/plugin-src/liteideaf
+      QMAKE: /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/bin/qmake
+      DIST: /dist
+    volumes:
+      - type: bind
+        source: ./plugin-src
+        target: /work/plugin-src
+      - type: bind
+        source: ./dist-win
+        target: /dist
+        bind:
+          create_host_path: true
+    command: ["build-plugin.sh"]
+    restart: "no"
+
+  export:
+    image: liteide-dev:qt6
+    working_dir: /dist
+    environment:
+      DIST: /dist
+      REQUIRE_PLUGIN: "1"
+      LITEIDE_WIN: /opt/liteide-dist-win
+    volumes:
+      - type: bind
+        source: ./plugin-src
+        target: /work/plugin-src
+      - type: bind
+        source: ./dist-win
+        target: /dist
+        bind:
+          create_host_path: true
+    entrypoint: ["/usr/local/bin/distribute.sh"]
+    command: ["windows"]
+    restart: "no"

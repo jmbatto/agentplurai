@@ -30,6 +30,30 @@ cd "${OUT}"
     "IDE_PLUGIN_PATH=${DIST}/lib/liteide/plugins"
 make -j"${JOBS:-$(nproc)}"
 
+# DESTDIR pose le .so dans /dist (éphémère). On le copie aussi dans le
+# répertoire de build, monté depuis l'hôte, pour que distribute.sh le trouve.
+SO=""
+for candidate in \
+    "${DIST}/lib/liteide/plugins/libliteideaf.so" \
+    "${OUT}/libliteideaf.so" \
+    "${OUT}/libliteideaf.so.1"
+do
+  if [[ -e "${candidate}" ]]; then
+    SO="${candidate}"
+    break
+  fi
+done
+if [[ -z "${SO}" ]]; then
+  SO="$(find "${DIST}/lib/liteide/plugins" "${OUT}" -name 'libliteideaf.so*' -type f 2>/dev/null | head -n 1 || true)"
+fi
+if [[ -z "${SO}" ]]; then
+  echo "ERROR: libliteideaf.so introuvable après le make." >&2
+  exit 1
+fi
+mkdir -p /opt/plugins-linux
+cp -a "${SO}" "${OUT}/libliteideaf.so"
+cp -a "${SO}" /opt/plugins-linux/libliteideaf.so
+
 echo "== plugin so =="
-find "${DIST}/lib/liteide/plugins" "${OUT}" -name '*liteideaf*' -o -name '*.so' | head
-echo "Copier le .so dans le lib/liteide/plugins d'un LiteIDE Linux, puis relancer l'IDE."
+ls -la "${OUT}/libliteideaf.so" /opt/plugins-linux/libliteideaf.so
+echo "Puis : docker compose --profile export run --rm export-linux"

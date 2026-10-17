@@ -26,7 +26,7 @@ case "${TARGET}" in
     PLUGIN_CANDIDATES=(
       "${PLUGIN_LINUX:-/opt/plugins-linux/libliteideaf.so}"
       "/work/plugin-src/liteideaf/build-linux/libliteideaf.so"
-      "/dist-linux/lib/liteide/plugins/libliteideaf.so"
+      "/work/plugin-src/liteideaf/build-linux/libliteideaf.so.1"
     )
     ;;
   *)
