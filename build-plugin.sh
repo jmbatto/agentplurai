@@ -4,6 +4,9 @@ set -euo pipefail
 
 : "${MXE_TARGET:=x86_64-w64-mingw32.shared}"
 : "${QMAKE:=/opt/mxe/usr/${MXE_TARGET}/qt6/bin/qmake}"
+# bash -lc recharge /etc/profile et peut effacer le PATH de l'image.
+# Le Makefile appelle le compilateur par son nom, pas par chemin absolu.
+export PATH="/opt/mxe/usr/bin:/opt/mxe/usr/${MXE_TARGET}/qt6/bin:${PATH}"
 HOST_QT_LIB="/opt/mxe/usr/x86_64-pc-linux-gnu/lib"
 # qmake MinGW est un wrapper vers qmake6 hôte ; ses .so MXE ne sont pas dans ldconfig.
 export LD_LIBRARY_PATH="${HOST_QT_LIB}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
