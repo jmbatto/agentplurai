@@ -88,11 +88,46 @@ if [[ "${TARGET}" == "linux" ]]; then
     ls -la "${LIBDIR}" "${SRC_LIB}" 2>/dev/null || true
     exit 1
   fi
+
+  # Qt 6.11 vient de l'image, pas de l'hôte. On copie les .so demandés
+  # par le binaire et le plugin de plateforme, puis un qt.conf.
+  QT_LIB="${DIST}/lib/qt6"
+  QT_PLUG="${DIST}/plugins"
+  mkdir -p "${QT_LIB}" "${QT_PLUG}/platforms"
+  ldd "${DIST}/bin/liteide" | awk '/=>/ { print $3 }' | while read -r so; do
+    case "${so}" in
+      *libQt6*|*libicu*|*libpcre2*|*libdouble-conversion*|*libb2*|*libmd4c*)
+        cp -a --no-preserve=ownership "${so}" "${QT_LIB}/" 2>/dev/null || true
+        ;;
+    esac
+  done
+  for plug in /usr/lib/x86_64-linux-gnu/qt6/plugins/platforms/libqxcb.so \
+              /usr/lib/qt6/plugins/platforms/libqxcb.so; do
+    if [[ -f "${plug}" ]]; then
+      cp -a --no-preserve=ownership "${plug}" "${QT_PLUG}/platforms/"
+      ldd "${plug}" | awk '/=>/ { print $3 }' | while read -r so; do
+        case "${so}" in
+          *libQt6*|*libxcb*|*libxkb*|*libicu*|*libpcre2*)
+            cp -a --no-preserve=ownership "${so}" "${QT_LIB}/" 2>/dev/null || true
+            ;;
+        esac
+      done
+      break
+    fi
+  done
+  cat > "${DIST}/bin/qt.conf" <<'EOF'
+[Paths]
+Prefix = ..
+Libraries = lib/qt6
+Plugins = plugins
+EOF
+
   mv "${DIST}/bin/liteide" "${DIST}/bin/liteide.bin"
   cat > "${DIST}/bin/liteide" <<'EOF'
 #!/bin/sh
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-export LD_LIBRARY_PATH="${ROOT}/lib/liteide${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export LD_LIBRARY_PATH="${ROOT}/lib/liteide:${ROOT}/lib/qt6${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export QT_PLUGIN_PATH="${ROOT}/plugins"
 exec "${ROOT}/bin/liteide.bin" "$@"
 EOF
   chmod 755 "${DIST}/bin/liteide" "${DIST}/bin/liteide.bin"
