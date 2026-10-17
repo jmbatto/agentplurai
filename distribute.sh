@@ -74,12 +74,12 @@ if [[ "${TARGET}" == "linux" ]]; then
   SRC_LIB="/src/liteide-linux/liteidex/liteide/lib/liteide"
   shopt -s nullglob
   for lib in "${SRC_LIB}"/libliteapp.so*; do
-    cp -a "${lib}" "${LIBDIR}/"
+    cp -a --no-preserve=ownership "${lib}" "${LIBDIR}/"
   done
   shopt -u nullglob
   if [[ -L "${LIBDIR}/libliteapp.so" && ! -e "${LIBDIR}/libliteapp.so" ]]; then
     if [[ -f "${SRC_LIB}/libliteapp.so" ]]; then
-      cp -aL "${SRC_LIB}/libliteapp.so" "${LIBDIR}/libliteapp.so.1"
+      cp -aL --no-preserve=ownership "${SRC_LIB}/libliteapp.so" "${LIBDIR}/libliteapp.so.1"
       ln -sf libliteapp.so.1 "${LIBDIR}/libliteapp.so"
     fi
   fi
