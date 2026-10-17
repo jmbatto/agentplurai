@@ -3,6 +3,10 @@
 #   docker compose -f docker-compose.windows.yml run --rm plugin
 #   docker compose -f docker-compose.windows.yml run --rm export
 # Résultat : ./dist-win/bin/liteide.exe et liteideaf.dll
+#
+# Les scripts sont montés en lecture seule sous /mnt/scripts.
+# Compose les copie dans /tmp et leur donne 755 : les droits de l'hôte
+# ne comptent pas, et on n'écrase pas les binaires de l'image.
 
 name: liteide-win
 
@@ -38,8 +42,14 @@ services:
           create_host_path: true
       - type: bind
         source: ./build-plugin.sh
-        target: /usr/local/bin/build-plugin.sh
-    command: ["build-plugin.sh"]
+        target: /mnt/scripts/build-plugin.sh
+        read_only: true
+    entrypoint: ["bash", "-lc"]
+    command:
+      - |
+        cp /mnt/scripts/build-plugin.sh /tmp/build-plugin.sh
+        chmod 755 /tmp/build-plugin.sh
+        exec /tmp/build-plugin.sh
     restart: "no"
 
   export:
@@ -60,7 +70,12 @@ services:
           create_host_path: true
       - type: bind
         source: ./distribute.sh
-        target: /usr/local/bin/distribute.sh
-    entrypoint: ["/usr/local/bin/distribute.sh"]
-    command: ["windows"]
+        target: /mnt/scripts/distribute.sh
+        read_only: true
+    entrypoint: ["bash", "-lc"]
+    command:
+      - |
+        cp /mnt/scripts/distribute.sh /tmp/distribute.sh
+        chmod 755 /tmp/distribute.sh
+        exec /tmp/distribute.sh windows
     restart: "no"

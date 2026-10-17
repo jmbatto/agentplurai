@@ -3,6 +3,10 @@
 #   docker compose -f docker-compose.linux.yml run --rm plugin
 #   docker compose -f docker-compose.linux.yml run --rm export
 # Résultat : ./dist-linux/bin/liteide et libliteideaf.so
+#
+# Les scripts sont montés en lecture seule sous /mnt/scripts.
+# Compose les copie dans /tmp et leur donne 755 : les droits de l'hôte
+# ne comptent pas, et on n'écrase pas les binaires de l'image.
 
 name: liteide-linux
 
@@ -38,8 +42,14 @@ services:
           create_host_path: true
       - type: bind
         source: ./build-plugin-linux.sh
-        target: /usr/local/bin/build-plugin-linux.sh
-    command: ["build-plugin-linux.sh"]
+        target: /mnt/scripts/build-plugin-linux.sh
+        read_only: true
+    entrypoint: ["bash", "-lc"]
+    command:
+      - |
+        cp /mnt/scripts/build-plugin-linux.sh /tmp/build-plugin-linux.sh
+        chmod 755 /tmp/build-plugin-linux.sh
+        exec /tmp/build-plugin-linux.sh
     restart: "no"
 
   export:
@@ -60,7 +70,12 @@ services:
           create_host_path: true
       - type: bind
         source: ./distribute.sh
-        target: /usr/local/bin/distribute.sh
-    entrypoint: ["/usr/local/bin/distribute.sh"]
-    command: ["linux"]
+        target: /mnt/scripts/distribute.sh
+        read_only: true
+    entrypoint: ["bash", "-lc"]
+    command:
+      - |
+        cp /mnt/scripts/distribute.sh /tmp/distribute.sh
+        chmod 755 /tmp/distribute.sh
+        exec /tmp/distribute.sh linux
     restart: "no"
