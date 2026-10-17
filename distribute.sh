@@ -54,10 +54,11 @@ fi
 
 rm -rf "${DIST:?}/"*
 mkdir -p "${DIST}"
-cp -a "${IDE_SRC}/." "${DIST}/"
+# --no-preserve=ownership : un bind mount hôte refuse souvent chown.
+cp -a --no-preserve=ownership "${IDE_SRC}/." "${DIST}/"
 mkdir -p "${DIST}/lib/liteide/plugins"
 if [[ -n "${PLUGIN_SRC}" ]]; then
-  cp -a "${PLUGIN_SRC}" "${DIST}/lib/liteide/plugins/${PLUGIN_NAME}"
+  cp -a --no-preserve=ownership "${PLUGIN_SRC}" "${DIST}/lib/liteide/plugins/${PLUGIN_NAME}"
 fi
 
 test -e "${DIST}/${IDE_BIN}"
