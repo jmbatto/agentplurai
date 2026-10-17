@@ -89,6 +89,21 @@ if [[ "${TARGET}" == "linux" ]]; then
     exit 1
   fi
 
+  # Données (liteenv/system.env, etc.). Sans elles, LiteIDE coredump
+  # en cherchant resourcePath()/liteenv/system.env.
+  RES="${DIST}/share/liteide"
+  mkdir -p "${RES}"
+  for src in /src/liteide-linux/liteidex/deploy /src/liteide-linux/liteidex/os_deploy/linux; do
+    if [[ -d "${src}" ]]; then
+      cp -a --no-preserve=ownership "${src}/." "${RES}/"
+    fi
+  done
+  if [[ ! -f "${RES}/liteenv/system.env" ]]; then
+    echo "ERROR: ${RES}/liteenv/system.env absent." >&2
+    find /src/liteide-linux -name 'system.env' 2>/dev/null | head >&2 || true
+    exit 1
+  fi
+
   # Qt 6.11 vient de l'image. ldd renvoie des liens : on copie la cible
   # réelle, puis on recrée le soname (libQt6Core.so.6) dans lib/qt6.
   QT_LIB="${DIST}/lib/qt6"
@@ -144,6 +159,8 @@ EOF
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 export LD_LIBRARY_PATH="${ROOT}/lib/liteide:${ROOT}/lib/qt6${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
 export QT_PLUGIN_PATH="${ROOT}/plugins"
+export LITEIDE_RES_PATH="${ROOT}/share/liteide"
+export LITEIDE_PLUGIN_PATH="${ROOT}/lib/liteide/plugins"
 exec "${ROOT}/bin/liteide.bin" "$@"
 EOF
   chmod 755 "${DIST}/bin/liteide" "${DIST}/bin/liteide.bin"
