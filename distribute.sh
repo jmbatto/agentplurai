@@ -89,32 +89,48 @@ if [[ "${TARGET}" == "linux" ]]; then
     exit 1
   fi
 
-  # Qt 6.11 vient de l'image, pas de l'hôte. On copie les .so demandés
-  # par le binaire et le plugin de plateforme, puis un qt.conf.
+  # Qt 6.11 vient de l'image. ldd renvoie des liens : on copie la cible
+  # réelle, puis on recrée le soname (libQt6Core.so.6) dans lib/qt6.
   QT_LIB="${DIST}/lib/qt6"
   QT_PLUG="${DIST}/plugins"
   mkdir -p "${QT_LIB}" "${QT_PLUG}/platforms"
+  copy_so() {
+    local so="$1"
+    [[ -e "${so}" ]] || return 0
+    local real base
+    real=$(readlink -f "${so}")
+    base=$(basename "${so}")
+    cp -aL --no-preserve=ownership "${real}" "${QT_LIB}/${base}"
+    if [[ "${base}" != "$(basename "${real}")" ]]; then
+      cp -aL --no-preserve=ownership "${real}" "${QT_LIB}/$(basename "${real}")"
+    fi
+  }
   ldd "${DIST}/bin/liteide" | awk '/=>/ { print $3 }' | while read -r so; do
     case "${so}" in
       *libQt6*|*libicu*|*libpcre2*|*libdouble-conversion*|*libb2*|*libmd4c*)
-        cp -a --no-preserve=ownership "${so}" "${QT_LIB}/" 2>/dev/null || true
+        copy_so "${so}"
         ;;
     esac
   done
   for plug in /usr/lib/x86_64-linux-gnu/qt6/plugins/platforms/libqxcb.so \
               /usr/lib/qt6/plugins/platforms/libqxcb.so; do
     if [[ -f "${plug}" ]]; then
-      cp -a --no-preserve=ownership "${plug}" "${QT_PLUG}/platforms/"
+      cp -aL --no-preserve=ownership "${plug}" "${QT_PLUG}/platforms/libqxcb.so"
       ldd "${plug}" | awk '/=>/ { print $3 }' | while read -r so; do
         case "${so}" in
           *libQt6*|*libxcb*|*libxkb*|*libicu*|*libpcre2*)
-            cp -a --no-preserve=ownership "${so}" "${QT_LIB}/" 2>/dev/null || true
+            copy_so "${so}"
             ;;
         esac
       done
       break
     fi
   done
+  if ! ls "${QT_LIB}"/libQt6Core.so* >/dev/null 2>&1; then
+    echo "ERROR: libQt6Core absent après copie." >&2
+    ldd "${DIST}/bin/liteide" >&2 || true
+    exit 1
+  fi
   cat > "${DIST}/bin/qt.conf" <<'EOF'
 [Paths]
 Prefix = ..
