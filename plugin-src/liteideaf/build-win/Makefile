@@ -20,7 +20,7 @@ CXXFLAGS      = -pipe -fno-keep-inline-dllexport -O2 -std=gnu++1z -Wall -Wextra 
 INCPATH       = -I../../liteideaf -I. -I/src/liteide/liteidex/src/api -I/src/liteide/liteidex/src/api/liteapi -I/src/liteide/liteidex/src/utils -I/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include -I/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtPrintSupport -I/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets -I/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtGui -I/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtNetwork -I/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore -I. -I/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/mkspecs/win32-g++ 
 LINKER      =        x86_64-w64-mingw32.shared-g++
 LFLAGS        =        -Wl,-s -shared -Wl,-subsystem,windows -mthreads -Wl,--out-implib,/dist/lib/liteide/plugins/libliteideaf.a
-LIBS        =        -L/src/liteide/liteidex/liteide/lib/liteide -L/opt/liteide-dist/bin -L/opt/liteide-dist/lib/liteide -lliteapi /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6PrintSupport.a /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6Widgets.a /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6Gui.a /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6Network.a /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6Core.a   
+LIBS        =        -L/src/liteide/liteidex/liteide/lib/liteide -L/opt/liteide-dist-win/bin -L/opt/liteide-dist-win/lib/liteide -lliteapi /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6PrintSupport.a /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6Widgets.a /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6Gui.a /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6Network.a /opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/lib/libQt6Core.a   
 QMAKE         = /opt/mxe/usr/x86_64-pc-linux-gnu/qt6/bin/qmake6
 DEL_FILE      = rm -f
 CHK_DIR_EXISTS= test -d
@@ -1103,15 +1103,19 @@ liteideafplugin.o: ../liteideafplugin.cpp ../liteideafplugin.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QRadioButton \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qradiobutton.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qabstractbutton.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QRandomGenerator \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qrandom.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QRegularExpression \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QTextEdit \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QTimer \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qtimer.h \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QVBoxLayout \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qboxlayout.h \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qlayout.h \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qlayoutitem.h \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qgridlayout.h
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QCryptographicHash \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QMessageAuthenticationCode \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qmessageauthenticationcode.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QSaveFile \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qsavefile.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QStandardPaths \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qstandardpaths.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o liteideafplugin.o ../liteideafplugin.cpp
 
 moc_liteideafplugin.o: moc_liteideafplugin.cpp 

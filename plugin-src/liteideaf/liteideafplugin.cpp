@@ -26,6 +26,8 @@
 #include <QRegularExpression>
 #include <QTextEdit>
 #include <QTimer>
+#include <QUrl>
+#include <QVBoxLayout>
 #include <QCryptographicHash>
 #include <QMessageAuthenticationCode>
 #include <QSaveFile>
