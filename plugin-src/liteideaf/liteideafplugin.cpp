@@ -395,11 +395,113 @@ bool LiteIdeAfPlugin::verifyEngines()
             }
         }
         if (ready) {
+            clearPending(name);
             info("Moteur " + name + " prêt.");
             logEvent("ready  scope=engine:" + name);
         }
     }
     return ok;
+}
+
+bool LiteIdeAfPlugin::clearPending(const QString &name)
+{
+    const QString path = contractPath();
+    QString text = yamlText();
+    const QString needle = "- name: " + name;
+    const int at = text.indexOf(needle);
+    if (at < 0)
+        return false;
+    const int next = text.indexOf("\n  - name:", at + needle.size());
+    const int end = next < 0 ? text.size() : next;
+    QString block = text.mid(at, end - at);
+    if (!block.contains("pending:"))
+        block += "    pending: false\n";
+    else
+        block.replace(QRegularExpression("pending:\\s*true"), "pending: false");
+    text.replace(at, end - at, block);
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly) || out.write(text.toUtf8()) < 0 || !out.commit())
+        return false;
+    return true;
+}
+
+bool LiteIdeAfPlugin::ensureGitBranch(const QString &root)
+{
+    if (root.isEmpty())
+        return false;
+    int code = 1;
+    run("git", {"-C", root, "rev-parse", "--is-inside-work-tree"}, 8000, &code);
+    if (code != 0) {
+        run("git", {"-C", root, "init"}, 8000, &code);
+        if (code != 0)
+            return false;
+    }
+    const QString branch = scalar(yamlText(), "branch").isEmpty() ? "agent" : scalar(yamlText(), "branch");
+    run("git", {"-C", root, "checkout", "-B", branch}, 8000, &code);
+    if (code == 0)
+        logEvent("git  branch=" + branch + "  host=" + root);
+    return code == 0;
+}
+
+bool LiteIdeAfPlugin::ensureContainer(const QString &host)
+{
+    const QString engine = activeCline();
+    const QString block = engineBlock(engine);
+    const QString image = blockValue(block, "image");
+    if (image.isEmpty()) {
+        warn("Champ figé manquant : image. Aucun envoi.");
+        logEvent("reject  reason=no-image  host=" + host);
+        return false;
+    }
+    const QString name = blockValue(block, "container");
+    if (name.isEmpty()) {
+        warn("Champ figé manquant : container. Aucun envoi.");
+        logEvent("reject  reason=no-container  host=" + host);
+        return false;
+    }
+    const QString mount = containerRoot().isEmpty() ? "/work/project" : containerRoot();
+    int code = 1;
+    const QString state = run("docker", {"inspect", "-f", "{{.State.Running}}", name}, 8000, &code).trimmed();
+    const QString mounted = run("docker", {"inspect", "-f",
+        "{{range .Mounts}}{{if eq .Destination \"/work/project\"}}{{.Source}}{{end}}{{end}}", name}, 8000, &code).trimmed();
+    const QString want = QFileInfo(host).canonicalFilePath();
+    if (code == 0 && QDir::fromNativeSeparators(mounted).compare(QDir::fromNativeSeparators(want), Qt::CaseInsensitive) != 0) {
+        run("docker", {"rm", "-f", name}, 20000);
+        code = 1;
+    }
+    if (code == 0 && state == "true")
+        return true;
+    if (code == 0 && state == "false") {
+        run("docker", {"start", name}, 30000, &code);
+        return code == 0;
+    }
+    const QString bind = QDir::fromNativeSeparators(host) + ":" + mount;
+    run("docker", {"run", "-d", "--name", name,
+        "-v", bind,
+        "-v", "cline-config:/root/.cline",
+        "-w", mount, image}, 60000, &code);
+    if (code != 0) {
+        warn("Création du conteneur impossible : " + name);
+        logEvent("reject  reason=docker-run  container=" + name);
+        return false;
+    }
+    logEvent("ok  container=" + name + "  host=" + host + "  mount=" + mount);
+    return true;
+}
+
+void LiteIdeAfPlugin::writeOk()
+{
+    const QString canonical = frozenCanonical();
+    const QByteArray sha = QCryptographicHash::hash(canonical.toUtf8(), QCryptographicHash::Sha256).toHex();
+    QStringList engines;
+    const QRegularExpression names("^\\s*- name:\\s*(\\S+)", QRegularExpression::MultilineOption);
+    QRegularExpressionMatchIterator it = names.globalMatch(yamlText());
+    while (it.hasNext())
+        engines << it.next().captured(1);
+    logEvent("ok  sha256:" + QString::fromLatin1(sha.left(12))
+        + "  hmac:" + hmacOf(canonical).left(12)
+        + "  engines=" + engines.join(",")
+        + "  host=" + currentProjectRoot());
 }
 
 bool LiteIdeAfPlugin::preValidate()
@@ -419,6 +521,7 @@ bool LiteIdeAfPlugin::preValidate()
         }
         logEvent("ok  hmac:" + hmacOf(frozenCanonical()).left(12) + "  host=" + currentProjectRoot());
     }
+    writeOk();
     return true;
 }
 
@@ -439,8 +542,12 @@ bool LiteIdeAfPlugin::postValidate()
     const QStringList was = previous.split('\n');
     for (const QString &line : now) {
         if (!was.contains(line)) {
+            const QString field = line.section('=', 0, 0);
+            QString scope = "companion";
+            if (field == "endpoint" || field == "image" || field == "engine")
+                scope = "engine:" + line.section('=', 1, 1).section('\n', 0, 0);
             warn("Contrat altéré : " + line + ". Aucun envoi.");
-            logEvent("corrupted  field=" + line.section('=', 0, 0) + "  reason=hmac-mismatch");
+            logEvent("corrupted  scope=" + scope + "  field=" + field + "  reason=hmac-mismatch");
             return false;
         }
     }
@@ -731,73 +838,16 @@ bool LiteIdeAfPlugin::recreateContainer(const QString &host)
 
 void LiteIdeAfPlugin::alignProject()
 {
+    if (!ensureContract())
+        return;
     const QString live = currentProjectRoot();
-    if (live.isEmpty()) {
-        warn("Aucun dossier trouvé.\nOuvre un fichier, ou File > Open Folder.\n"
-             "LiteIDE n'a pas de projet formel ouvert, et aucun éditeur courant.");
-        return;
-    }
-    const QString path = contractPath();
-    if (!QFileInfo(path).isFile()) {
-        if (QMessageBox::question(m_app->mainWindow(), "AgentPlurAI",
-                "Aucun agentplurai.yaml trouvé.\nLe créer dans\n" + path + " ?") != QMessageBox::Yes)
-            return;
-        QFile created(path);
-        if (!created.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            warn("Création impossible : " + path);
-            return;
-        }
-        const QString host = QDir::fromNativeSeparators(live);
-        const QString skeleton =
-            "version: 1\n"
-            "dryRun: false\n"
-            "systemPrompt: |\n"
-            "  Ne sors pas du volume déclaré.\n"
-            "  N’inclus aucun jeton dans la réponse.\n"
-            "history:\n"
-            "  file: /work/project/.agentplurai/prompts.log\n"
-            "  journal: /work/project/.agentplurai/actions.log\n"
-            "engines:\n"
-            "  - name: cline-project\n"
-            "    kind: agent\n"
-            "    image: cline-project:go1.26.7\n"
-            "    container: cline-project\n"
-            "    access: docker-socket\n"
-            "    shared:\n"
-            "      host: " + host + "\n"
-            "      container: /work/project\n"
-            "    auth: volume\n"
-            "    systemPrompt: |\n"
-            "      Volume /work/project uniquement. Pas de cgo.\n"
-            "      Travaille sur la branche agent/. Pas de push.\n"
-            "projects:\n"
-            "  - path: " + host + "\n"
-            "    engine: cline-project\n"
-            "    active: true\n";
-        created.write(skeleton.toUtf8());
-        created.close();
-        info("Contrat créé :\n" + path);
-        return;
-    }
-    const QString declared = declaredHost();
-    if (QDir::fromNativeSeparators(live).compare(QDir::fromNativeSeparators(declared), Qt::CaseInsensitive) == 0) {
-        info("Le projet actif est déjà celui du YAML :\n" + live);
-        return;
-    }
-    const auto answer = QMessageBox::question(
-        m_app->mainWindow(), "AgentPlurAI",
-        "Le projet LiteIDE n'est pas celui du YAML.\n\nActif : " + live + "\nYAML : " + declared
-            + "\n\nMettre à jour le YAML et recréer le conteneur ?\n"
-              "(Docker ne peut pas changer un montage à chaud.)");
-    if (answer != QMessageBox::Yes)
-        return;
     if (!updateDeclaredHost(live)) {
         warn("Écriture du YAML impossible : " + contractPath());
         return;
     }
-    if (!recreateContainer(live))
+    if (!ensureContainer(live))
         return;
-    info("Conteneur recréé sur :\n" + live + "\n.agentplurai sera créé au démarrage.");
+    info("Conteneur aligné sur :\n" + live);
 }
 
 void LiteIdeAfPlugin::setDefaultAI()
@@ -877,13 +927,11 @@ void LiteIdeAfPlugin::sendPrompt()
     if (!ensureContract() || !preValidate() || !postValidate())
         return;
     const QString live = currentProjectRoot();
-    const QString declared = declaredHost();
-    if (!live.isEmpty() && !declared.isEmpty()
-        && QDir::fromNativeSeparators(live).compare(QDir::fromNativeSeparators(declared), Qt::CaseInsensitive) != 0) {
-        alignProject();
-        if (QDir::fromNativeSeparators(currentProjectRoot()).compare(
-                QDir::fromNativeSeparators(declaredHost()), Qt::CaseInsensitive) != 0)
+    if (!live.isEmpty() && blockValue(engineBlock(activeCline()), "kind") == "agent") {
+        if (!ensureContainer(live))
             return;
+        if (!ensureGitBranch(live))
+            warn("Branche agent non créée.");
     }
     const QString engine = m_defaultEngine.isEmpty() ? activeCline() : m_defaultEngine;
     if (engine.isEmpty()) {
@@ -969,15 +1017,16 @@ void LiteIdeAfPlugin::sendPrompt()
     }
 
     const bool refuseIfDirty = scalar(yamlText(), "refuseIfDirty") != "false";
-    if (refuseIfDirty && (editorDirty() || gitDirty(hostRoot()))) {
-        warn("Refusé : tampon LiteIDE sale ou git dirty sur " + hostRoot());
+    if (refuseIfDirty && (editorDirty() || gitDirty(live))) {
+        warn("Arbre de travail sale. Commit ou rangez avant d’envoyer.");
+        logEvent("reject  reason=dirty  host=" + live);
         return;
     }
     showLoadingDialog(engine);
     const QString container = blockValue(block, "container");
     if (container.isEmpty()) {
         hideLoadingDialog();
-        warn("Pas de clé container dans le bloc " + engine + ".\nAjoute container: cline-project sous ce moteur.");
+        warn("Champ figé manquant : container. Aucun envoi.");
         return;
     }
     const QString inBox = "/tmp/agentplurai-prompt.txt";
@@ -1029,6 +1078,7 @@ void LiteIdeAfPlugin::onOllamaFinished()
         thinkingText = jsonDoc.object().value("thinking").toString();
     }
     showAnswer(m_pendingEngine, m_pendingBlock, responseText, thinkingText);
+    postValidate();
 }
 
 void LiteIdeAfPlugin::onClineFinished(int, int)
@@ -1043,6 +1093,7 @@ void LiteIdeAfPlugin::onClineFinished(int, int)
     QString thinking;
     splitCline(out, &response, &thinking);
     showAnswer(m_pendingEngine, m_pendingBlock, response.isEmpty() ? "Cline sans sortie" : response, thinking);
+    postValidate();
 }
 
 void LiteIdeAfPlugin::showHistory()
@@ -1066,7 +1117,7 @@ void LiteIdeAfPlugin::showHistory()
     if (isModel) {
         out = "Historique non disponible pour " + engine + " : appel HTTP sans journal.";
     } else {
-        const QString container = blockValue(block, "container");
+        const QString container = blockValue(engineBlock(activeCline()), "container");
         const QString path = containerRoot() + "/.agentplurai/prompts.log";
         out = container.isEmpty()
             ? "Pas de clé container pour " + engine
@@ -1098,7 +1149,7 @@ void LiteIdeAfPlugin::showJournal()
     if (isModel) {
         out = "Journal non disponible pour " + engine + " : modèle HTTP sans actions.";
     } else {
-        const QString container = blockValue(block, "container");
+        const QString container = blockValue(engineBlock(activeCline()), "container");
         const QString path = containerRoot() + "/.agentplurai/actions.log";
         out = container.isEmpty()
             ? "Pas de clé container pour " + engine

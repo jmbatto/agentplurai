@@ -1109,6 +1109,11 @@ liteideafplugin.o: ../liteideafplugin.cpp ../liteideafplugin.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QTextEdit \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QTimer \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qtimer.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QVBoxLayout \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qboxlayout.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qlayout.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qlayoutitem.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qgridlayout.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QCryptographicHash \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QMessageAuthenticationCode \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qmessageauthenticationcode.h \

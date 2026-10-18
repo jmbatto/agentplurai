@@ -76,6 +76,10 @@ private:
     QString frozenCanonical() const;
     QString hmacOf(const QString &canonical);
     bool verifyEngines();
+    bool clearPending(const QString &name);
+    bool ensureGitBranch(const QString &root);
+    bool ensureContainer(const QString &host);
+    void writeOk();
     QString snapshotPath() const;
 
     LiteApi::IApplication *m_app;
