@@ -22,11 +22,14 @@
 #include <QNetworkRequest>
 #include <QProcess>
 #include <QRadioButton>
+#include <QRandomGenerator>
 #include <QRegularExpression>
 #include <QTextEdit>
 #include <QTimer>
-#include <QUrl>
-#include <QVBoxLayout>
+#include <QCryptographicHash>
+#include <QMessageAuthenticationCode>
+#include <QSaveFile>
+#include <QStandardPaths>
 
 namespace {
 
@@ -197,6 +200,249 @@ QString LiteIdeAfPlugin::contractPath() const
     const QString fallbackDir = dirs.isEmpty() || dirs.first().isEmpty()
         ? QDir::currentPath() : dirs.first();
     return QDir(fallbackDir).filePath("agentplurai.yaml");
+}
+
+QString LiteIdeAfPlugin::storeDir() const
+{
+#ifdef Q_OS_WIN
+    const QString base = qEnvironmentVariable("APPDATA");
+    return QDir(base.isEmpty() ? QDir::homePath() : base).filePath("liteide/agentplurai");
+#else
+    return QDir::home().filePath(".config/liteide/agentplurai");
+#endif
+}
+
+QString LiteIdeAfPlugin::logPath() const
+{
+    const QString forced = qEnvironmentVariable("AGENTPLURAI_LOG");
+    if (!forced.isEmpty()) {
+        QFile probe(forced);
+        if (probe.open(QIODevice::WriteOnly | QIODevice::Append))
+            return forced;
+    }
+#ifndef Q_OS_WIN
+    QFile sys("/var/log/liteide/agentplurai.log");
+    if (sys.open(QIODevice::WriteOnly | QIODevice::Append))
+        return sys.fileName();
+#endif
+    QDir().mkpath(storeDir());
+    return QDir(storeDir()).filePath("mounts.log");
+}
+
+void LiteIdeAfPlugin::logEvent(const QString &line)
+{
+    const QString path = logPath();
+    QFileInfo info(path);
+    if (info.exists() && info.size() > 10 * 1024 * 1024)
+        QFile::rename(path, path + ".1");
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Append))
+        return;
+    const QString stamp = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+    f.write((stamp + "  " + line + "\n").toUtf8());
+}
+
+QByteArray LiteIdeAfPlugin::sealKey()
+{
+    QDir().mkpath(storeDir());
+    const QString path = QDir(storeDir()).filePath("seal.key");
+    QFile f(path);
+    if (f.exists() && f.open(QIODevice::ReadOnly))
+        return f.readAll();
+    QByteArray key(32, 0);
+    for (int i = 0; i < key.size(); ++i)
+        key[i] = char(QRandomGenerator::global()->bounded(256));
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(key);
+        f.close();
+#ifndef Q_OS_WIN
+        QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+#endif
+    }
+    return key;
+}
+
+QString LiteIdeAfPlugin::frozenCanonical() const
+{
+    const QString text = yamlText();
+    QStringList parts;
+    parts << "host=" + QFileInfo(currentProjectRoot()).canonicalFilePath();
+    const QRegularExpression names("^\\s*- name:\\s*(\\S+)", QRegularExpression::MultilineOption);
+    QRegularExpressionMatchIterator it = names.globalMatch(text);
+    while (it.hasNext()) {
+        const QString name = it.next().captured(1);
+        const QString block = engineBlock(name);
+        parts << "engine=" + name
+              << "kind=" + blockValue(block, "kind")
+              << "endpoint=" + blockValue(block, "endpoint")
+              << "image=" + blockValue(block, "image")
+              << "container=" + blockValue(block, "container");
+    }
+    parts << "mount=" + containerRoot();
+    parts.sort();
+    return parts.join("\n");
+}
+
+QString LiteIdeAfPlugin::hmacOf(const QString &canonical)
+{
+    return QString::fromLatin1(
+        QMessageAuthenticationCode::hash(canonical.toUtf8(), sealKey(), QCryptographicHash::Sha256).toHex());
+}
+
+QString LiteIdeAfPlugin::snapshotPath() const
+{
+    return QDir(storeDir()).filePath("frozen.snap");
+}
+
+bool LiteIdeAfPlugin::ensureContract()
+{
+    const QString root = currentProjectRoot();
+    if (root.isEmpty()) {
+        warn("Aucun projet actif. Aucun envoi.");
+        logEvent("reject  reason=no-project");
+        return false;
+    }
+    const QString path = QDir(root).filePath("agentplurai.yaml");
+    if (QFileInfo(path).isFile())
+        return true;
+    const QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+    const QString body =
+        "meta:\n"
+        "  schema: 1\n"
+        "  created: " + now + "\n"
+        "  createdBy: plugin/liteideaf\n"
+        "  generator: 0.1.0\n"
+        "  comment: |\n"
+        "    Created by the plugin. Ollama is prefilled on the usual port.\n"
+        "    The plugin clears pending after verification.\n"
+        "container: cline-project\n"
+        "image: cline-project:go1.26.7\n"
+        "shared:\n"
+        "  container: /work/project\n"
+        "track:\n"
+        "  kind: git\n"
+        "  branch: agent\n"
+        "  refuseIfDirty: true\n"
+        "engines:\n"
+        "  - name: ollama-local\n"
+        "    kind: model\n"
+        "    pending: true\n"
+        "    model: \"\"\n"
+        "    access: http\n"
+        "    endpoint: http://127.0.0.1:11434\n"
+        "    thinking_progress: false\n"
+        "    rendering_markdown: true\n"
+        "  - name: cline-project\n"
+        "    kind: agent\n"
+        "    pending: true\n"
+        "    image: cline-project:go1.26.7\n"
+        "    container: cline-project\n"
+        "    access: docker\n"
+        "    shared:\n"
+        "      container: /work/project\n"
+        "    thinking_progress: true\n"
+        "    rendering_markdown: true\n"
+        "projects:\n"
+        "  - path: \"" + QDir::fromNativeSeparators(root) + "\"\n"
+        "    engine: cline-project\n"
+        "    active: true\n";
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly) || out.write(body.toUtf8()) < 0 || !out.commit()) {
+        warn("Contrat illisible. Aucun envoi.");
+        logEvent("reject  reason=write-failed  host=" + root);
+        return false;
+    }
+    logEvent("init  host=" + root);
+    logEvent("log-path  path=" + logPath());
+    info("Contrat créé : agentplurai.yaml. Vérification des moteurs.");
+    return true;
+}
+
+bool LiteIdeAfPlugin::verifyEngines()
+{
+    const QString text = yamlText();
+    const QRegularExpression names("^\\s*- name:\\s*(\\S+)", QRegularExpression::MultilineOption);
+    QRegularExpressionMatchIterator it = names.globalMatch(text);
+    bool ok = true;
+    while (it.hasNext()) {
+        const QString name = it.next().captured(1);
+        const QString block = engineBlock(name);
+        if (blockValue(block, "pending") == "false")
+            continue;
+        const QString kind = blockValue(block, "kind");
+        bool ready = false;
+        if (kind == "model") {
+            const QString ep = blockValue(block, "endpoint");
+            int code = 1;
+            run("curl", {"-sf", "--max-time", "2", ep + "/api/tags"}, 4000, &code);
+            ready = code == 0;
+            if (!ready) {
+                warn("Moteur " + name + " injoignable (" + ep + "). Aucun envoi vers celui-ci.");
+                logEvent("pending  scope=engine:" + name + "  field=endpoint");
+                ok = false;
+            }
+        } else if (kind == "agent") {
+            const QString image = blockValue(block, "image");
+            int code = 1;
+            run("docker", {"image", "inspect", image}, 8000, &code);
+            ready = code == 0;
+            if (!ready) {
+                warn("Moteur " + name + " injoignable (" + image + "). Aucun envoi vers celui-ci.");
+                logEvent("pending  scope=engine:" + name + "  field=image");
+                ok = false;
+            }
+        }
+        if (ready) {
+            info("Moteur " + name + " prêt.");
+            logEvent("ready  scope=engine:" + name);
+        }
+    }
+    return ok;
+}
+
+bool LiteIdeAfPlugin::preValidate()
+{
+    if (yamlText().isEmpty()) {
+        warn("Contrat illisible. Aucun envoi.");
+        logEvent("reject  reason=unreadable  host=" + currentProjectRoot());
+        return false;
+    }
+    verifyEngines();
+    QDir().mkpath(storeDir());
+    if (!QFileInfo(snapshotPath()).isFile()) {
+        QSaveFile snap(snapshotPath());
+        if (snap.open(QIODevice::WriteOnly)) {
+            snap.write(frozenCanonical().toUtf8());
+            snap.commit();
+        }
+        logEvent("ok  hmac:" + hmacOf(frozenCanonical()).left(12) + "  host=" + currentProjectRoot());
+    }
+    return true;
+}
+
+bool LiteIdeAfPlugin::postValidate()
+{
+    const QString canonical = frozenCanonical();
+    const QString mac = hmacOf(canonical);
+    QFile snap(snapshotPath());
+    if (!snap.open(QIODevice::ReadOnly)) {
+        warn("Pas d'état de référence. Realignez.");
+        logEvent("reject  reason=no-snapshot");
+        return false;
+    }
+    const QString previous = QString::fromUtf8(snap.readAll());
+    if (previous == canonical)
+        return true;
+    const QStringList now = canonical.split('\n');
+    const QStringList was = previous.split('\n');
+    for (const QString &line : now) {
+        if (!was.contains(line)) {
+            warn("Contrat altéré : " + line + ". Aucun envoi.");
+            logEvent("corrupted  field=" + line.section('=', 0, 0) + "  reason=hmac-mismatch");
+            return false;
+        }
+    }
+    return true;
 }
 
 QString LiteIdeAfPlugin::yamlText() const
@@ -626,6 +872,8 @@ void LiteIdeAfPlugin::showScope()
 
 void LiteIdeAfPlugin::sendPrompt()
 {
+    if (!ensureContract() || !preValidate() || !postValidate())
+        return;
     const QString live = currentProjectRoot();
     const QString declared = declaredHost();
     if (!live.isEmpty() && !declared.isEmpty()

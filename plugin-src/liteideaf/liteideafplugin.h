@@ -45,6 +45,9 @@ private:
     void hideLoadingDialog();
     void updateElapsed();
     QString contractPath() const;
+    bool ensureContract();
+    bool preValidate();
+    bool postValidate();
     QString yamlText() const;
     bool dryRun() const;
     QString activeCline() const;
@@ -65,6 +68,15 @@ private:
     void info(const QString &text) const;
     void warn(const QString &text) const;
     void showAnswer(const QString &engine, const QString &block, const QString &response, const QString &thinking) const;
+
+    QString storeDir() const;
+    QString logPath() const;
+    void logEvent(const QString &line);
+    QByteArray sealKey();
+    QString frozenCanonical() const;
+    QString hmacOf(const QString &canonical);
+    bool verifyEngines();
+    QString snapshotPath() const;
 
     LiteApi::IApplication *m_app;
 };
