@@ -52,6 +52,7 @@ template <> constexpr inline auto LiteIdeAfPlugin::qt_create_metaobjectdata<qt_m
         "reloadWrites",
         "setDefaultAI",
         "alignProject",
+        "toggleHideThinking",
         "onOllamaFinished",
         "onClineFinished",
         "code",
@@ -79,11 +80,13 @@ template <> constexpr inline auto LiteIdeAfPlugin::qt_create_metaobjectdata<qt_m
         QtMocHelpers::SlotData<void()>(10, 2, QMC::AccessPrivate, QMetaType::Void),
         // Slot 'alignProject'
         QtMocHelpers::SlotData<void()>(11, 2, QMC::AccessPrivate, QMetaType::Void),
-        // Slot 'onOllamaFinished'
+        // Slot 'toggleHideThinking'
         QtMocHelpers::SlotData<void()>(12, 2, QMC::AccessPrivate, QMetaType::Void),
+        // Slot 'onOllamaFinished'
+        QtMocHelpers::SlotData<void()>(13, 2, QMC::AccessPrivate, QMetaType::Void),
         // Slot 'onClineFinished'
-        QtMocHelpers::SlotData<void(int, int)>(13, 2, QMC::AccessPrivate, QMetaType::Void, {{
-            { QMetaType::Int, 14 }, { QMetaType::Int, 15 },
+        QtMocHelpers::SlotData<void(int, int)>(14, 2, QMC::AccessPrivate, QMetaType::Void, {{
+            { QMetaType::Int, 15 }, { QMetaType::Int, 16 },
         }}),
     };
     QtMocHelpers::UintData qt_properties {
@@ -118,8 +121,9 @@ void LiteIdeAfPlugin::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int 
         case 7: _t->reloadWrites(); break;
         case 8: _t->setDefaultAI(); break;
         case 9: _t->alignProject(); break;
-        case 10: _t->onOllamaFinished(); break;
-        case 11: _t->onClineFinished((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2]))); break;
+        case 10: _t->toggleHideThinking(); break;
+        case 11: _t->onOllamaFinished(); break;
+        case 12: _t->onClineFinished((*reinterpret_cast<std::add_pointer_t<int>>(_a[1])),(*reinterpret_cast<std::add_pointer_t<int>>(_a[2]))); break;
         default: ;
         }
     }
@@ -144,14 +148,14 @@ int LiteIdeAfPlugin::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 12)
+        if (_id < 13)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 12;
+        _id -= 13;
     }
     if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 12)
+        if (_id < 13)
             *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType();
-        _id -= 12;
+        _id -= 13;
     }
     return _id;
 }

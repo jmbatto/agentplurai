@@ -1055,19 +1055,22 @@ liteideafplugin.o: ../liteideafplugin.cpp ../liteideafplugin.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QInputDialog \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qinputdialog.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qlineedit.h \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QJsonDocument \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qjsondocument.h \
-		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qjsonparseerror.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QJsonArray \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qjsonarray.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qjsonvalue.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qcborvalue.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qcborcommon.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qregularexpression.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/quuid.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qjsondocument.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qjsonparseerror.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QJsonDocument \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QJsonObject \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/qjsonobject.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QLabel \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qlabel.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtGui/qpicture.h \
+		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtCore/QLocale \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/QMessageBox \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtWidgets/qmessagebox.h \
 		/opt/mxe/usr/x86_64-w64-mingw32.shared/qt6/include/QtNetwork/QNetworkAccessManager \

@@ -12,9 +12,11 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QInputDialog>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#include <QLocale>
 #include <QMenu>
 #include <QMessageBox>
 #include <QNetworkAccessManager>
@@ -78,32 +80,28 @@ void splitCline(const QString &raw, QString *response, QString *thinking)
 {
     QString clean = stripAnsi(raw);
     clean.replace("\r\n", "\n");
-    QString think;
-    QString body;
-    bool inTool = false;
     const QStringList rows = clean.split('\n');
-    for (const QString &row : rows) {
-        const QString t = row.trimmed();
-        const bool marker = t.contains("[thinking]") || t.contains("[run_commands]")
-            || t.contains("[run_command]") || t.contains("[editor]") || t.startsWith("⎿");
-        if (marker) {
-            inTool = true;
-            think += row + "\n";
-            continue;
-        }
-        if (inTool && t.isEmpty()) {
-            think += "\n";
-            continue;
-        }
-        if (inTool && (t.startsWith("Analyse") || t.startsWith("#") || t.startsWith("**") || t.startsWith("| ") || t.startsWith("```")))
-            inTool = false;
-        if (inTool)
-            think += row + "\n";
-        else if (!(t.startsWith("```") && t.endsWith("```") && t.count("```") == 2))
-            body += row + "\n";
-        else
-            body += t.mid(3, t.size() - 6) + "\n";
+    int lastMarker = -1;
+    for (int i = 0; i < rows.size(); ++i) {
+        const QString t = rows.at(i).trimmed();
+        if (t.contains("[thinking]") || t.contains("[run_commands]")
+            || t.contains("[run_command]") || t.contains("[editor]") || t.startsWith("⎿"))
+            lastMarker = i;
     }
+    if (lastMarker < 0) {
+        *thinking = QString();
+        *response = clean.trimmed();
+        return;
+    }
+    int splitAt = lastMarker + 1;
+    while (splitAt < rows.size() && rows.at(splitAt).trimmed().isEmpty())
+        ++splitAt;
+    QString think;
+    for (int i = 0; i <= lastMarker; ++i)
+        think += rows.at(i) + "\n";
+    QString body;
+    for (int i = splitAt; i < rows.size(); ++i)
+        body += rows.at(i) + "\n";
     *thinking = think.trimmed();
     *response = body.trimmed();
     if (response->isEmpty())
@@ -120,6 +118,7 @@ LiteIdeAfPlugin::LiteIdeAfPlugin()
     , m_elapsedSeconds(0)
     , m_pendingReply(nullptr)
     , m_pendingProcess(nullptr)
+    , m_hideThinkingAction(nullptr)
     , m_app(nullptr)
 {
 }
@@ -342,7 +341,7 @@ bool LiteIdeAfPlugin::ensureContract()
         "    access: docker\n"
         "    shared:\n"
         "      container: /work/project\n"
-        "    thinking_progress: true\n"
+        "    thinking_progress: false\n"
         "    rendering_markdown: true\n"
         "projects:\n"
         "  - path: \"" + QDir::fromNativeSeparators(root) + "\"\n"
@@ -443,6 +442,25 @@ bool LiteIdeAfPlugin::ensureGitBranch(const QString &root)
     return code == 0;
 }
 
+bool LiteIdeAfPlugin::mountsMatch(const QString &mounted, const QString &want) const
+{
+    auto norm = [](QString s) {
+        s = QDir::fromNativeSeparators(s).toLower();
+        if (s.startsWith("/host_mnt/"))
+            s = s.mid(10);
+        while (s.startsWith("//"))
+            s = s.mid(1);
+        if (s.size() > 2 && s.at(0) == '/' && s.at(2) == '/')
+            s = s.mid(1);
+        if (s.endsWith('/'))
+            s.chop(1);
+        return s;
+    };
+    const QString a = norm(mounted);
+    const QString b = norm(QFileInfo(want).canonicalFilePath().isEmpty() ? want : QFileInfo(want).canonicalFilePath());
+    return !a.isEmpty() && !b.isEmpty() && (a == b || a.endsWith(b) || b.endsWith(a));
+}
+
 bool LiteIdeAfPlugin::ensureContainer(const QString &host)
 {
     const QString engine = activeCline();
@@ -459,32 +477,52 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
         logEvent("reject  reason=no-container  host=" + host);
         return false;
     }
+    if (host.isEmpty()) {
+        warn("Aucun projet à monter pour " + name);
+        return false;
+    }
     const QString mount = containerRoot().isEmpty() ? "/work/project" : containerRoot();
-    int code = 1;
-    const QString state = run("docker", {"inspect", "-f", "{{.State.Running}}", name}, 8000, &code).trimmed();
-    const QString mounted = run("docker", {"inspect", "-f",
-        "{{range .Mounts}}{{if eq .Destination \"/work/project\"}}{{.Source}}{{end}}{{end}}", name}, 8000, &code).trimmed();
-    const QString want = QFileInfo(host).canonicalFilePath();
-    if (code == 0 && QDir::fromNativeSeparators(mounted).compare(QDir::fromNativeSeparators(want), Qt::CaseInsensitive) != 0) {
-        run("docker", {"rm", "-f", name}, 20000);
-        code = 1;
+
+    int existsCode = 1;
+    run("docker", {"inspect", name}, 8000, &existsCode);
+    const bool exists = existsCode == 0;
+
+    bool running = false;
+    bool sameMount = false;
+    if (exists) {
+        int stateCode = 1;
+        const QString state = run("docker", {"inspect", "-f", "{{.State.Running}}", name}, 8000, &stateCode).trimmed();
+        running = stateCode == 0 && state == "true";
+        const QString mounted = run("docker", {"inspect", "-f",
+            "{{range .Mounts}}{{if eq .Destination \"/work/project\"}}{{.Source}}{{end}}{{end}}", name}, 8000).trimmed();
+        sameMount = mountsMatch(mounted, host);
     }
-    if (code == 0 && state == "true")
+
+    if (exists && running && sameMount) {
+        logEvent("ok  container=" + name + "  host=" + host + "  mount=" + mount);
         return true;
-    if (code == 0 && state == "false") {
-        run("docker", {"start", name}, 30000, &code);
-        return code == 0;
     }
+
+    if (exists) {
+        const QString why = running ? "mauvais montage" : "arrêté";
+        run("docker", {"rm", "-f", name}, 20000);
+        logEvent("rm  container=" + name + "  reason=" + why);
+    }
+
     const QString bind = QDir::fromNativeSeparators(host) + ":" + mount;
-    run("docker", {"run", "-d", "--name", name,
+    int code = 1;
+    const QString out = run("docker", {"run", "-d", "--name", name,
+        "-e", "PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/bin",
         "-v", bind,
         "-v", "cline-config:/root/.cline",
-        "-w", mount, image}, 60000, &code);
+        "-w", mount, image, "sleep", "infinity"}, 60000, &code);
     if (code != 0) {
-        warn("Création du conteneur impossible : " + name);
+        warn("Recréation échouée pour " + name + " :\n" + out);
         logEvent("reject  reason=docker-run  container=" + name);
         return false;
     }
+    info("Conteneur recréé : " + name + "\nMontage : " + host + " → " + mount
+        + "\nClé Z.ai : volume cline-config (conservée)");
     logEvent("ok  container=" + name + "  host=" + host + "  mount=" + mount);
     return true;
 }
@@ -712,6 +750,13 @@ void LiteIdeAfPlugin::showAnswer(const QString &engine, const QString &block, co
     else
         textEdit->setPlainText(md);
     layout->addWidget(textEdit);
+    const int chars = md.size();
+    auto *sizeLabel = new QLabel(
+        QString("Reçu : %1 caractères%2")
+            .arg(QLocale(QLocale::French).toString(chars))
+            .arg(showThinking ? "" : " (réflexion masquée)"),
+        &dialog);
+    layout->addWidget(sizeLabel);
     dialog.exec();
 }
 
@@ -752,6 +797,15 @@ bool LiteIdeAfPlugin::load(LiteApi::IApplication *app)
     addParam("IA par défaut", &LiteIdeAfPlugin::setDefaultAI);
     addParam("Aligner le projet", &LiteIdeAfPlugin::alignProject);
     addParam("System prompt", &LiteIdeAfPlugin::editSystemPrompt);
+    m_hideThinkingAction = paramMenu->addAction("Masquage réflexion : ok");
+    m_hideThinkingAction->setCheckable(true);
+    connect(m_hideThinkingAction, &QAction::triggered, this, &LiteIdeAfPlugin::toggleHideThinking);
+    connect(paramMenu, &QMenu::aboutToShow, this, [this]() {
+        const QString block = engineBlock(activeCline());
+        const bool hidden = blockValue(block, "thinking_progress") != "true";
+        m_hideThinkingAction->setChecked(hidden);
+        m_hideThinkingAction->setText(hidden ? "Masquage réflexion : ok" : "Masquage réflexion : non");
+    });
     addParam("Santé", &LiteIdeAfPlugin::health);
     addParam("Quota Cline", &LiteIdeAfPlugin::showQuota);
     return true;
@@ -796,11 +850,12 @@ bool LiteIdeAfPlugin::updateDeclaredHost(const QString &host)
     const QRegularExpression hostRe("(^|\\n)([ \\t]*)host:[^\\n]*");
     const QRegularExpression pathRe("(^|\\n)([ \\t]*)path:[^\\n]*");
     if (!hostRe.match(text).hasMatch()) {
-        warn("Clé host absente dans " + path);
-        return false;
+        text += "\nhost: " + normalized + "\n";
+    } else {
+        text.replace(hostRe, "\\1\\2host: " + normalized);
     }
-    text.replace(hostRe, "\\1\\2host: " + normalized);
-    text.replace(pathRe, "\\1\\2path: " + normalized);
+    if (pathRe.match(text).hasMatch())
+        text.replace(pathRe, "\\1\\2path: " + normalized);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         warn("YAML non écrivable : " + path);
         return false;
@@ -828,6 +883,7 @@ bool LiteIdeAfPlugin::recreateContainer(const QString &host)
             warn(QString::fromUtf8(p.readAllStandardError()));
             return false;
         }
+        info("Conteneur recréé via compose : " + container + "\nProjet : " + host);
         return true;
     }
     if (image.isEmpty()) {
@@ -844,22 +900,53 @@ bool LiteIdeAfPlugin::recreateContainer(const QString &host)
         warn(out);
         return false;
     }
+    info("Conteneur recréé : " + container + "\nMontage : " + host + " → " + containerRoot());
     return true;
 }
 
 void LiteIdeAfPlugin::alignProject()
 {
-    if (!ensureContract())
-        return;
     const QString live = currentProjectRoot();
-    if (!updateDeclaredHost(live)) {
-        warn("Écriture du YAML impossible : " + contractPath());
+    if (live.isEmpty()) {
+        warn("Aucun projet actif. Alignez depuis un dossier ouvert.");
         return;
     }
+    if (!ensureContract())
+        return;
+
+    // Toujours valider le conteneur, même si le YAML est déjà bon.
     if (!ensureContainer(live))
         return;
+
+    if (!updateDeclaredHost(live))
+        warn("YAML non mis à jour (" + contractPath() + "). Conteneur aligné quand même.");
     sealSnapshot();
     info("Conteneur aligné sur :\n" + live + "\nContrat rescellé.");
+}
+
+void LiteIdeAfPlugin::toggleHideThinking()
+{
+    if (!ensureContract())
+        return;
+    const QString path = contractPath();
+    QString text = yamlText();
+    if (text.isEmpty()) {
+        warn("YAML illisible : " + path);
+        return;
+    }
+    const bool hide = m_hideThinkingAction->isChecked();
+    const QString value = hide ? "false" : "true";
+    if (!text.contains("thinking_progress:"))
+        text += "\nthinking_progress: " + value + "\n";
+    else
+        text.replace(QRegularExpression("thinking_progress:\\s*\\S+"), "thinking_progress: " + value);
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly) || out.write(text.toUtf8()) < 0 || !out.commit()) {
+        warn("YAML non écrivable : " + path);
+        return;
+    }
+    m_hideThinkingAction->setText(hide ? "Masquage réflexion : ok" : "Masquage réflexion : non");
+    info(hide ? "Réflexion masquée." : "Réflexion affichée.");
 }
 
 void LiteIdeAfPlugin::setDefaultAI()
@@ -888,11 +975,13 @@ void LiteIdeAfPlugin::setDefaultAI()
 
 void LiteIdeAfPlugin::health()
 {
+    QStringList lines;
+    lines << "Plugin : " + QString(LITEIDEAF_VERSION);
     if (yamlText().isEmpty()) {
-        warn("YAML introuvable : " + contractPath());
+        lines << "YAML : introuvable (" + contractPath() + ")";
+        info(lines.join("\n"));
         return;
     }
-    QStringList lines;
     const QString cline = activeCline();
     if (cline.isEmpty())
         lines << "Cline actif : aucun";
@@ -1034,6 +1123,8 @@ void LiteIdeAfPlugin::sendPrompt()
         logEvent("reject  reason=dirty  host=" + live);
         return;
     }
+    if (!ensureContainer(live))
+        return;
     showLoadingDialog(engine);
     const QString container = blockValue(block, "container");
     if (container.isEmpty()) {
@@ -1246,8 +1337,94 @@ void LiteIdeAfPlugin::showQuota()
         warn("Pas de clé container pour le moteur actif.");
         return;
     }
-    const QString out = run("docker", {"exec", container, "cline", "auth"}, 15000);
-    info("Sortie locale de Cline (pas la console Z.ai) :\n" + out);
+    const QString script =
+        "set -e; "
+        "f=/root/.cline/data/settings/providers.json; "
+        "[ -f \"$f\" ] || f=/root/.cline/data/secrets.json; "
+        "if [ ! -f \"$f\" ]; then echo 'Aucun fichier de clé dans /root/.cline'; exit 0; fi; "
+        "key=$(node -e '"
+        "const fs=require(\"fs\");"
+        "const j=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\"));"
+        "const keys=[];"
+        "function walk(o){if(!o||typeof o!==\"object\")return;"
+        "for(const [k,v] of Object.entries(o)){"
+        "if(typeof v===\"string\"&&/key|token|secret/i.test(k)&&v.length>8)keys.push(v);"
+        "else walk(v);}};"
+        "walk(j);process.stdout.write(keys[0]||\"\");"
+        "' \"$f\"); "
+        "if [ -z \"$key\" ]; then echo 'Clé introuvable dans /root/.cline'; exit 0; fi; "
+        "curl -fsS -H \"Authorization: Bearer $key\" -H \"Accept: application/json\" "
+        "https://api.z.ai/api/monitor/usage/quota/limit "
+        "|| curl -fsS -H \"Authorization: $key\" -H \"Accept: application/json\" "
+        "https://api.z.ai/api/monitor/usage/quota/limit";
+    const QString raw = run("docker", {"exec", container, "bash", "-lc", script}, 20000);
+    const QString out = raw;
+    QJsonParseError err;
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.trimmed().toUtf8(), &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        info("Quota Z.ai (sortie brute) :\n" + raw.left(4000));
+        return;
+    }
+    const QJsonObject data = doc.object().value("data").toObject();
+    const QJsonArray limits = data.value("limits").toArray();
+    QStringList lines;
+    lines << "Quota Z.ai — ce qu'il reste sur le plan";
+    if (limits.isEmpty()) {
+        lines << raw.left(2000);
+        info(lines.join("\n"));
+        return;
+    }
+    auto windowOf = [](const QJsonObject &o) {
+        const int unit = o.value("unit").toInt();
+        const int number = o.value("number").toInt(1);
+        if (unit == 3 && number == 5) return QString("fenêtre glissante de 5 heures");
+        if (unit == 6) return QString("fenêtre de %1 jours").arg(number);
+        if (unit == 5) return QString("quota mensuel");
+        if (unit == 1) return QString("fenêtre de %1 jours").arg(number);
+        if (number > 1) return QString("fenêtre de %1 unités").arg(number);
+        return QString();
+    };
+    auto labelOf = [](const QString &type) {
+        if (type == "CREDIT_LIMIT") return QString("Crédits");
+        if (type == "TOKENS_LIMIT") return QString("Tokens");
+        if (type == "TIME_LIMIT") return QString("Outils (recherche, lecteur)");
+        return type.isEmpty() ? QString("Quota") : type;
+    };
+    auto fmt = [](double n) {
+        return QLocale(QLocale::French).toString(qint64(n));
+    };
+    int index = 0;
+    for (const QJsonValue &v : limits) {
+        const QJsonObject o = v.toObject();
+        ++index;
+        const QString type = o.value("type").toString();
+        const QString window = windowOf(o);
+        const double pct = o.value("percentage").toDouble();
+        const double total = o.value("usage").toDouble();
+        const double left = o.value("remaining").toDouble();
+        const double used = o.value("currentValue").toDouble();
+        QString title = labelOf(type);
+        if (!window.isEmpty())
+            title += " — " + window;
+        else if (limits.size() > 1)
+            title += QString(" — enveloppe %1").arg(index);
+        lines << "";
+        lines << title;
+        lines << QString("  Reste : %1 sur %2").arg(fmt(left), fmt(total));
+        lines << QString("  Déjà consommé : %1 (%2 %)").arg(fmt(used)).arg(pct, 0, 'f', 0);
+        if (o.contains("nextResetTime")) {
+            const qint64 ms = qint64(o.value("nextResetTime").toDouble());
+            if (ms > 0) {
+                const QDateTime reset = QDateTime::fromMSecsSinceEpoch(ms);
+                const qint64 mins = QDateTime::currentDateTime().secsTo(reset) / 60;
+                QString when = reset.toString("dd/MM HH:mm");
+                if (mins > 0)
+                    when += QString(" (dans %1 h %2 min)").arg(mins / 60).arg(mins % 60);
+                lines << "  Réinitialisation : " + when;
+            }
+        }
+    }
+    info(lines.join("\n"));
 }
 
 void LiteIdeAfPlugin::reloadWrites()

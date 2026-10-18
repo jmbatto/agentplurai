@@ -3,6 +3,9 @@
 
 #include "liteapi/liteapi.h"
 
+// Incrémenter à chaque livraison du plugin.
+#define LITEIDEAF_VERSION "0.10"
+
 class QDialog;
 class QLabel;
 class QTimer;
@@ -27,6 +30,7 @@ private slots:
     void reloadWrites();
     void setDefaultAI();
     void alignProject();
+    void toggleHideThinking();
     void onOllamaFinished();
     void onClineFinished(int code, int status);
 
@@ -40,6 +44,7 @@ private:
     QString m_pendingBlock;
     QNetworkReply *m_pendingReply;
     QProcess *m_pendingProcess;
+    QAction *m_hideThinkingAction;
 
     void showLoadingDialog(const QString &engine);
     void hideLoadingDialog();
@@ -79,6 +84,7 @@ private:
     bool clearPending(const QString &name);
     bool ensureGitBranch(const QString &root);
     bool ensureContainer(const QString &host);
+    bool mountsMatch(const QString &mounted, const QString &want) const;
     void writeOk();
     void sealSnapshot();
     QString snapshotPath() const;
@@ -98,7 +104,7 @@ public:
         m_info->setId("plugin/liteideaf");
         m_info->setName("LiteIDE AgentPlurAI");
         m_info->setAuthor("JM Batto");
-        m_info->setVer("0.1");
+        m_info->setVer(LITEIDEAF_VERSION);
         m_info->setInfo("Multiple AI assistant");
         m_info->appendDepend("plugin/liteeditor");
     }
