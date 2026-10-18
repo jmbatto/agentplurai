@@ -489,6 +489,17 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
     return true;
 }
 
+void LiteIdeAfPlugin::sealSnapshot()
+{
+    QDir().mkpath(storeDir());
+    QSaveFile snap(snapshotPath());
+    if (!snap.open(QIODevice::WriteOnly))
+        return;
+    snap.write(frozenCanonical().toUtf8());
+    snap.commit();
+    writeOk();
+}
+
 void LiteIdeAfPlugin::writeOk()
 {
     const QString canonical = frozenCanonical();
@@ -546,7 +557,7 @@ bool LiteIdeAfPlugin::postValidate()
             QString scope = "companion";
             if (field == "endpoint" || field == "image" || field == "engine")
                 scope = "engine:" + line.section('=', 1, 1).section('\n', 0, 0);
-            warn("Contrat altéré : " + line + ". Aucun envoi.");
+            warn("Contrat altéré : " + line + ". Aucun envoi. Alignez le projet pour resceller.");
             logEvent("corrupted  scope=" + scope + "  field=" + field + "  reason=hmac-mismatch");
             return false;
         }
@@ -847,7 +858,8 @@ void LiteIdeAfPlugin::alignProject()
     }
     if (!ensureContainer(live))
         return;
-    info("Conteneur aligné sur :\n" + live);
+    sealSnapshot();
+    info("Conteneur aligné sur :\n" + live + "\nContrat rescellé.");
 }
 
 void LiteIdeAfPlugin::setDefaultAI()

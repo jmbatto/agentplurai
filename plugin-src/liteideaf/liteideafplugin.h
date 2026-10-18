@@ -80,6 +80,7 @@ private:
     bool ensureGitBranch(const QString &root);
     bool ensureContainer(const QString &host);
     void writeOk();
+    void sealSnapshot();
     QString snapshotPath() const;
 
     LiteApi::IApplication *m_app;
