@@ -489,6 +489,10 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
 
     bool running = false;
     bool sameMount = false;
+    QString network, hostname, user, workdir;
+    QStringList extraEnv, extraVolumes, labels, aliases, exposes;
+    QString shm, restart;
+    QString healthCmd, healthInterval, healthTimeout, healthRetries, healthStart;
     if (exists) {
         int stateCode = 1;
         const QString state = run("docker", {"inspect", "-f", "{{.State.Running}}", name}, 8000, &stateCode).trimmed();
@@ -496,6 +500,46 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
         const QString mounted = run("docker", {"inspect", "-f",
             "{{range .Mounts}}{{if eq .Destination \"/work/project\"}}{{.Source}}{{end}}{{end}}", name}, 8000).trimmed();
         sameMount = mountsMatch(mounted, host);
+
+        network = run("docker", {"inspect", "-f",
+            "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}", name}, 8000).trimmed();
+        hostname = run("docker", {"inspect", "-f", "{{.Config.Hostname}}", name}, 8000).trimmed();
+        user = run("docker", {"inspect", "-f", "{{.Config.User}}", name}, 8000).trimmed();
+        workdir = run("docker", {"inspect", "-f", "{{.Config.WorkingDir}}", name}, 8000).trimmed();
+        shm = run("docker", {"inspect", "-f", "{{.HostConfig.ShmSize}}", name}, 8000).trimmed();
+        restart = run("docker", {"inspect", "-f", "{{.HostConfig.RestartPolicy.Name}}", name}, 8000).trimmed();
+
+        const QString envRaw = run("docker", {"inspect", "-f",
+            "{{range .Config.Env}}{{.}}\\n{{end}}", name}, 8000);
+        for (const QString &line : envRaw.split('\n', Qt::SkipEmptyParts))
+            extraEnv << line;
+
+        const QString mountsRaw = run("docker", {"inspect", "-f",
+            "{{range .Mounts}}{{if ne .Destination \"/work/project\"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}:{{.Destination}}\\n{{end}}{{end}}", name}, 8000);
+        for (const QString &line : mountsRaw.split('\n', Qt::SkipEmptyParts)) {
+            if (line.contains(":.cline") || line.endsWith("/.cline"))
+                continue;
+            extraVolumes << line;
+        }
+        const QString labelsRaw = run("docker", {"inspect", "-f",
+            "{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}\\n{{end}}", name}, 8000);
+        for (const QString &line : labelsRaw.split('\n', Qt::SkipEmptyParts))
+            labels << line;
+        const QString aliasRaw = run("docker", {"inspect", "-f",
+            "{{range .NetworkSettings.Networks}}{{range .Aliases}}{{.}}\\n{{end}}{{end}}", name}, 8000);
+        for (const QString &line : aliasRaw.split('\n', Qt::SkipEmptyParts))
+            if (line != name)
+                aliases << line;
+        const QString exposeRaw = run("docker", {"inspect", "-f",
+            "{{range $p, $v := .Config.ExposedPorts}}{{$p}}\\n{{end}}", name}, 8000);
+        for (const QString &line : exposeRaw.split('\n', Qt::SkipEmptyParts))
+            exposes << line.split('/').first();
+        healthCmd = run("docker", {"inspect", "-f",
+            "{{range .Config.Healthcheck.Test}}{{.}} {{end}}", name}, 8000).trimmed();
+        healthInterval = run("docker", {"inspect", "-f", "{{.Config.Healthcheck.Interval}}", name}, 8000).trimmed();
+        healthTimeout = run("docker", {"inspect", "-f", "{{.Config.Healthcheck.Timeout}}", name}, 8000).trimmed();
+        healthRetries = run("docker", {"inspect", "-f", "{{.Config.Healthcheck.Retries}}", name}, 8000).trimmed();
+        healthStart = run("docker", {"inspect", "-f", "{{.Config.Healthcheck.StartPeriod}}", name}, 8000).trimmed();
     }
 
     if (exists && running && sameMount) {
@@ -509,21 +553,62 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
         logEvent("rm  container=" + name + "  reason=" + why);
     }
 
-    const QString bind = QDir::fromNativeSeparators(host) + ":" + mount;
+    QStringList args = {"run", "-d", "--name", name};
+    if (!network.isEmpty() && network != "bridge")
+        args << "--network" << network;
+    if (!hostname.isEmpty())
+        args << "--hostname" << hostname;
+    if (!user.isEmpty())
+        args << "--user" << user;
+    if (!restart.isEmpty() && restart != "no")
+        args << "--restart" << restart;
+    if (!shm.isEmpty() && shm != "0" && shm != "67108864")
+        args << "--shm-size" << shm;
+    for (const QString &a : aliases)
+        args << "--network-alias" << a;
+    for (const QString &l : labels)
+        args << "--label" << l;
+    for (const QString &p : exposes)
+        args << "--expose" << p;
+    if (!healthCmd.isEmpty() && healthCmd != "NONE") {
+        args << "--health-cmd" << healthCmd;
+        if (!healthInterval.isEmpty() && healthInterval != "0")
+            args << "--health-interval" << healthInterval;
+        if (!healthTimeout.isEmpty() && healthTimeout != "0")
+            args << "--health-timeout" << healthTimeout;
+        if (!healthRetries.isEmpty() && healthRetries != "0")
+            args << "--health-retries" << healthRetries;
+        if (!healthStart.isEmpty() && healthStart != "0")
+            args << "--health-start-period" << healthStart;
+    }
+    for (const QString &e : extraEnv)
+        args << "-e" << e;
+    args << "-v" << QDir::fromNativeSeparators(host) + ":" + mount;
+    args << "-v" << "cline-config:/home/mpiuser/.cline";
+    for (const QString &v : extraVolumes)
+        args << "-v" << v;
+    args << "-w" << (workdir.isEmpty() ? mount : workdir);
+    args << image << "sleep" << "infinity";
+
     int code = 1;
-    const QString out = run("docker", {"run", "-d", "--name", name,
-        "-e", "PATH=/usr/local/go/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/bin",
-        "-v", bind,
-        "-v", "cline-config:/root/.cline",
-        "-w", mount, image, "sleep", "infinity"}, 60000, &code);
+    const QString out = run("docker", args, 60000, &code);
     if (code != 0) {
         warn("Recréation échouée pour " + name + " :\n" + out);
         logEvent("reject  reason=docker-run  container=" + name);
         return false;
     }
-    info("Conteneur recréé : " + name + "\nMontage : " + host + " → " + mount
-        + "\nClé Z.ai : volume cline-config (conservée)");
-    logEvent("ok  container=" + name + "  host=" + host + "  mount=" + mount);
+
+    int cfgCode = 1;
+    run("docker", {"exec", name, "bash", "--noprofile", "--norc", "-c",
+        "test -s /home/mpiuser/.cline/data/settings/providers.json || test -s /home/mpiuser/.cline/data/secrets.json"},
+        8000, &cfgCode);
+    const QString cfg = cfgCode == 0 ? "présente" : "absente";
+    info("Conteneur recréé : " + name
+        + "\nMontage : " + host + " → " + mount
+        + "\nRéseau : " + (network.isEmpty() ? "bridge" : network)
+        + "\nClé Z.ai : " + cfg);
+    logEvent("ok  container=" + name + "  host=" + host + "  mount=" + mount
+        + "  net=" + (network.isEmpty() ? "bridge" : network) + "  cline=" + cfg);
     return true;
 }
 
@@ -1150,11 +1235,14 @@ void LiteIdeAfPlugin::sendPrompt()
     logp.closeWriteChannel();
     logp.waitForFinished(8000);
 
-    const QString script = "prompt=$(cat " + inBox + "); exec cline \"$prompt\"";
+    const QString script =
+        "export PATH=\"/opt/venv/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:${PATH}\"; "
+        "prompt=$(cat " + inBox + "); "
+        "exec cline \"$prompt\" 2>/tmp/agentplurai-stderr.log";
     m_pendingProcess = new QProcess(this);
     connect(m_pendingProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, &LiteIdeAfPlugin::onClineFinished);
-    m_pendingProcess->start("docker", {"exec", "-w", containerRoot(), container, "bash", "-lc", script});
+    m_pendingProcess->start("docker", {"exec", "-w", containerRoot(), container, "bash", "--noprofile", "--norc", "-c", script});
 }
 
 void LiteIdeAfPlugin::onOllamaFinished()
@@ -1188,13 +1276,16 @@ void LiteIdeAfPlugin::onClineFinished(int, int)
 {
     if (!m_pendingProcess)
         return;
-    const QString out = QString::fromUtf8(m_pendingProcess->readAllStandardOutput() + m_pendingProcess->readAllStandardError());
+    const QString out = QString::fromUtf8(m_pendingProcess->readAllStandardOutput());
+    const QString err = QString::fromUtf8(m_pendingProcess->readAllStandardError());
     m_pendingProcess->deleteLater();
     m_pendingProcess = nullptr;
     hideLoadingDialog();
     QString response;
     QString thinking;
     splitCline(out, &response, &thinking);
+    if (!err.trimmed().isEmpty())
+        response += "\n\n---\nstderr:\n" + err.trimmed();
     showAnswer(m_pendingEngine, m_pendingBlock, response.isEmpty() ? "Cline sans sortie" : response, thinking);
     postValidate();
 }

@@ -4,7 +4,7 @@
 #include "liteapi/liteapi.h"
 
 // Incrémenter à chaque livraison du plugin.
-#define LITEIDEAF_VERSION "0.10"
+#define LITEIDEAF_VERSION "0.13"
 
 class QDialog;
 class QLabel;
