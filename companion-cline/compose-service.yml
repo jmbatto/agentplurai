@@ -1,0 +1,28 @@
+# Service à ajouter dans docker-compose.yml du cluster MPI.
+# Monte le même volume que les nœuds : Cline voit le code, les nœuds l'exécutent.
+# La clé Z.ai vit dans cline-config, pas dans l'image.
+
+  cline:
+    build:
+      context: ./cline-on-mpi
+      dockerfile: Dockerfile
+    image: jmbatto/m2chps-mpi41-cline:latest
+    container_name: cline-mpi
+    hostname: cline
+    user: "1001:1001"
+    working_dir: /work/project
+    volumes:
+      - usrlocalvarmpi-foo:/work/project
+      - cline-config:/home/mpiuser/.cline
+    environment:
+      CLINE_TELEMETRY_DISABLED: "true"
+      DO_NOT_TRACK: "1"
+      GOTOOLCHAIN: local
+      PATH: /usr/local/go/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/bin
+    networks:
+      - mpinet
+    # volontairement absent : /var/run/docker.sock
+    restart: "no"
+
+# Et dans volumes: ajouter
+#   cline-config:
