@@ -464,7 +464,8 @@ bool LiteIdeAfPlugin::mountsMatch(const QString &mounted, const QString &want) c
 bool LiteIdeAfPlugin::ensureContainer(const QString &host)
 {
     // Recreate only when the project bind or an extra volume is missing.
-    // Inspect first; propagate only fields that exist. .cline is compose-owned.
+    // Inspect first; propagate only fields that exist.
+    // .cline is remounted if present (token lives there); compose owns the volume.
     const QString engine = activeCline();
     const QString block = engineBlock(engine);
     const QString image = blockValue(block, "image");
@@ -558,8 +559,7 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
             return dst;
         };
         auto skipDst = [&mount](const QString &dst) {
-            return dst == mount || dst == "/home/mpiuser/.cline" || dst == "/root/.cline"
-                || dst.endsWith("/.cline");
+            return dst == mount;
         };
 
         QString projectSrc;
