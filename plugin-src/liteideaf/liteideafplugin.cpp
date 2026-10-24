@@ -608,9 +608,6 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
     for (const QString &e : extraEnv)
         args << "-e" << e;
     args << "-v" << QDir::fromNativeSeparators(host) + ":" + mount;
-    args << "-v" << "cline-config:/home/mpiuser/.cline";
-    for (const QString &v : extraVolumes)
-        args << "-v" << v;
     args << "-w" << (workdir.isEmpty() ? mount : workdir);
     args << image << "sleep" << "infinity";
 
@@ -622,17 +619,11 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
         return false;
     }
 
-    int cfgCode = 1;
-    run("docker", {"exec", name, "bash", "--noprofile", "--norc", "-c",
-        "test -s /home/mpiuser/.cline/data/settings/providers.json || test -s /home/mpiuser/.cline/data/secrets.json"},
-        8000, &cfgCode);
-    const QString cfg = cfgCode == 0 ? "présente" : "absente";
     info("Conteneur recréé : " + name
         + "\nMontage : " + host + " → " + mount
-        + "\nRéseau : " + (network.isEmpty() ? "bridge" : network)
-        + "\nClé Z.ai : " + cfg);
+        + "\nRéseau : " + (network.isEmpty() ? "bridge" : network));
     logEvent("ok  container=" + name + "  host=" + host + "  mount=" + mount
-        + "  net=" + (network.isEmpty() ? "bridge" : network) + "  cline=" + cfg);
+        + "  net=" + (network.isEmpty() ? "bridge" : network));
     return true;
 }
 
