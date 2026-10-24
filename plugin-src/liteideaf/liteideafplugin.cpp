@@ -493,53 +493,60 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
     QStringList extraEnv, extraVolumes, labels, aliases, exposes;
     QString shm, restart;
     QString healthCmd, healthInterval, healthTimeout, healthRetries, healthStart;
+
+    auto field = [this, &name](const QString &tmpl) -> QString {
+        int code = 1;
+        const QString v = run("docker", {"inspect", "-f", tmpl, name}, 8000, &code).trimmed();
+        if (code != 0 || v.isEmpty() || v == "<no value>" || v == "[]" || v == "map[]" || v == "<nil>")
+            return {};
+        return v;
+    };
+
     if (exists) {
-        int stateCode = 1;
-        const QString state = run("docker", {"inspect", "-f", "{{.State.Running}}", name}, 8000, &stateCode).trimmed();
-        running = stateCode == 0 && state == "true";
-        const QString mounted = run("docker", {"inspect", "-f",
-            "{{range .Mounts}}{{if eq .Destination \"/work/project\"}}{{.Source}}{{end}}{{end}}", name}, 8000).trimmed();
+        const QString state = field("{{.State.Running}}");
+        running = state == "true";
+        const QString mounted = field("{{range .Mounts}}{{if eq .Destination \"/work/project\"}}{{.Source}}{{end}}{{end}}");
         sameMount = mountsMatch(mounted, host);
 
-        network = run("docker", {"inspect", "-f",
-            "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}", name}, 8000).trimmed();
-        hostname = run("docker", {"inspect", "-f", "{{.Config.Hostname}}", name}, 8000).trimmed();
-        user = run("docker", {"inspect", "-f", "{{.Config.User}}", name}, 8000).trimmed();
-        workdir = run("docker", {"inspect", "-f", "{{.Config.WorkingDir}}", name}, 8000).trimmed();
-        shm = run("docker", {"inspect", "-f", "{{.HostConfig.ShmSize}}", name}, 8000).trimmed();
-        restart = run("docker", {"inspect", "-f", "{{.HostConfig.RestartPolicy.Name}}", name}, 8000).trimmed();
+        network = field("{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}");
+        hostname = field("{{.Config.Hostname}}");
+        user = field("{{.Config.User}}");
+        workdir = field("{{.Config.WorkingDir}}");
+        shm = field("{{.HostConfig.ShmSize}}");
+        restart = field("{{.HostConfig.RestartPolicy.Name}}");
 
-        const QString envRaw = run("docker", {"inspect", "-f",
-            "{{range .Config.Env}}{{.}}\\n{{end}}", name}, 8000);
+        const QString envRaw = field("{{range .Config.Env}}{{.}}\\n{{end}}");
         for (const QString &line : envRaw.split('\n', Qt::SkipEmptyParts))
-            extraEnv << line;
+            if (line.contains('='))
+                extraEnv << line;
 
-        const QString mountsRaw = run("docker", {"inspect", "-f",
-            "{{range .Mounts}}{{if ne .Destination \"/work/project\"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}:{{.Destination}}\\n{{end}}{{end}}", name}, 8000);
+        const QString mountsRaw = field("{{range .Mounts}}{{if ne .Destination \"/work/project\"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}:{{.Destination}}\\n{{end}}{{end}}");
         for (const QString &line : mountsRaw.split('\n', Qt::SkipEmptyParts)) {
-            if (line.contains(":.cline") || line.endsWith("/.cline"))
+            if (line.contains(":.cline") || line.endsWith("/.cline") || !line.contains(':'))
                 continue;
             extraVolumes << line;
         }
-        const QString labelsRaw = run("docker", {"inspect", "-f",
-            "{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}\\n{{end}}", name}, 8000);
+        const QString labelsRaw = field("{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}\\n{{end}}");
         for (const QString &line : labelsRaw.split('\n', Qt::SkipEmptyParts))
-            labels << line;
-        const QString aliasRaw = run("docker", {"inspect", "-f",
-            "{{range .NetworkSettings.Networks}}{{range .Aliases}}{{.}}\\n{{end}}{{end}}", name}, 8000);
+            if (line.contains('='))
+                labels << line;
+        const QString aliasRaw = field("{{range .NetworkSettings.Networks}}{{range .Aliases}}{{.}}\\n{{end}}{{end}}");
         for (const QString &line : aliasRaw.split('\n', Qt::SkipEmptyParts))
-            if (line != name)
+            if (!line.isEmpty() && line != name)
                 aliases << line;
-        const QString exposeRaw = run("docker", {"inspect", "-f",
-            "{{range $p, $v := .Config.ExposedPorts}}{{$p}}\\n{{end}}", name}, 8000);
-        for (const QString &line : exposeRaw.split('\n', Qt::SkipEmptyParts))
-            exposes << line.split('/').first();
-        healthCmd = run("docker", {"inspect", "-f",
-            "{{range .Config.Healthcheck.Test}}{{.}} {{end}}", name}, 8000).trimmed();
-        healthInterval = run("docker", {"inspect", "-f", "{{.Config.Healthcheck.Interval}}", name}, 8000).trimmed();
-        healthTimeout = run("docker", {"inspect", "-f", "{{.Config.Healthcheck.Timeout}}", name}, 8000).trimmed();
-        healthRetries = run("docker", {"inspect", "-f", "{{.Config.Healthcheck.Retries}}", name}, 8000).trimmed();
-        healthStart = run("docker", {"inspect", "-f", "{{.Config.Healthcheck.StartPeriod}}", name}, 8000).trimmed();
+        const QString exposeRaw = field("{{range $p, $v := .Config.ExposedPorts}}{{$p}}\\n{{end}}");
+        for (const QString &line : exposeRaw.split('\n', Qt::SkipEmptyParts)) {
+            const QString port = line.split('/').first();
+            if (!port.isEmpty())
+                exposes << port;
+        }
+        if (!field("{{.Config.Healthcheck}}").isEmpty()) {
+            healthCmd = field("{{range .Config.Healthcheck.Test}}{{.}} {{end}}");
+            healthInterval = field("{{.Config.Healthcheck.Interval}}");
+            healthTimeout = field("{{.Config.Healthcheck.Timeout}}");
+            healthRetries = field("{{.Config.Healthcheck.Retries}}");
+            healthStart = field("{{.Config.Healthcheck.StartPeriod}}");
+        }
     }
 
     if (exists && running && sameMount) {
