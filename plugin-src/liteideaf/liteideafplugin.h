@@ -3,8 +3,8 @@
 
 #include "liteapi/liteapi.h"
 
-// Incrémenter à chaque livraison du plugin.
-#define LITEIDEAF_VERSION "0.16"
+// Bump on every plugin delivery.
+#define LITEIDEAF_VERSION "0.18"
 
 class QDialog;
 class QLabel;

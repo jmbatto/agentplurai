@@ -463,6 +463,8 @@ bool LiteIdeAfPlugin::mountsMatch(const QString &mounted, const QString &want) c
 
 bool LiteIdeAfPlugin::ensureContainer(const QString &host)
 {
+    // Recreate only when the project bind or an extra volume is missing.
+    // Inspect first; propagate only fields that exist. .cline is compose-owned.
     const QString engine = activeCline();
     const QString block = engineBlock(engine);
     const QString image = blockValue(block, "image");
@@ -494,6 +496,7 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
     QString shm, restart;
     QString healthCmd, healthInterval, healthTimeout, healthRetries, healthStart;
 
+    // Reject empty, missing, or template-nil values. Never propagate a default.
     auto field = [this, &name](const QString &tmpl) -> QString {
         int code = 1;
         const QString v = run("docker", {"inspect", "-f", tmpl, name}, 8000, &code).trimmed();
@@ -505,7 +508,8 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
     if (exists) {
         const QString state = field("{{.State.Running}}");
         running = state == "true";
-        const QString mounted = field("{{range .Mounts}}{{if eq .Destination \"/work/project\"}}{{.Source}}{{end}}{{end}}");
+        const QString mounted = field(
+            "{{range .Mounts}}{{if eq .Destination \"" + mount + "\"}}{{.Source}}{{end}}{{end}}");
         sameMount = mountsMatch(mounted, host);
 
         network = field("{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}");
@@ -526,8 +530,12 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
             extraEnv << line;
         }
 
-        // Délimiteur '|' : un chemin Windows (C:/...) ne casse plus le split.
-        const QString mountsRaw = field("{{range .Mounts}}{{if ne .Destination \"/work/project\"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}|{{.Destination}}\\n{{end}}{{end}}");
+        // '|' delimiter: a Windows path (C:/...) no longer breaks the split.
+        // Skip the project bind (reapplied below) and .cline (compose-owned).
+        // Skip Windows drive binds: Docker splits on ':' ("too many colons").
+        const QString mountsRaw = field(
+            "{{range .Mounts}}{{if ne .Destination \"" + mount + "\"}}"
+            "{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}|{{.Destination}}\\n{{end}}{{end}}");
         for (const QString &line : mountsRaw.split('\n', Qt::SkipEmptyParts)) {
             const int bar = line.indexOf('|');
             if (bar <= 0)
@@ -538,7 +546,6 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
                 continue;
             if (dst == "/home/mpiuser/.cline" || dst == "/root/.cline" || dst.endsWith("/.cline"))
                 continue;
-            // Bind Windows (C:/...) : Docker le coupe sur ':'. On ne le propage pas.
             if (src.size() >= 2 && src.at(1) == ':')
                 continue;
             extraVolumes << src + ":" + dst;
@@ -557,8 +564,14 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
             if (!port.isEmpty())
                 exposes << port;
         }
+        // Strip CMD / CMD-SHELL: --health-cmd expects the bare command.
         if (!field("{{.Config.Healthcheck}}").isEmpty()) {
-            healthCmd = field("{{range .Config.Healthcheck.Test}}{{.}} {{end}}");
+            QString raw = field("{{range .Config.Healthcheck.Test}}{{.}} {{end}}").trimmed();
+            if (raw.startsWith("CMD-SHELL "))
+                raw = raw.mid(10);
+            else if (raw.startsWith("CMD "))
+                raw = raw.mid(4);
+            healthCmd = raw.trimmed();
             healthInterval = field("{{.Config.Healthcheck.Interval}}");
             healthTimeout = field("{{.Config.Healthcheck.Timeout}}");
             healthRetries = field("{{.Config.Healthcheck.Retries}}");
@@ -566,9 +579,22 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
         }
     }
 
+    // Early return only when the project bind and every extra volume are present.
     if (exists && running && sameMount) {
-        logEvent("ok  container=" + name + "  host=" + host + "  mount=" + mount);
-        return true;
+        bool volumesOk = true;
+        for (const QString &v : extraVolumes) {
+            const QString dst = v.section(':', 1);
+            const QString got = field(
+                "{{range .Mounts}}{{if eq .Destination \"" + dst + "\"}}ok{{end}}{{end}}");
+            if (got != "ok") {
+                volumesOk = false;
+                break;
+            }
+        }
+        if (volumesOk) {
+            logEvent("ok  container=" + name + "  host=" + host + "  mount=" + mount);
+            return true;
+        }
     }
 
     if (exists) {
@@ -608,6 +634,8 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
     for (const QString &e : extraEnv)
         args << "-e" << e;
     args << "-v" << QDir::fromNativeSeparators(host) + ":" + mount;
+    for (const QString &v : extraVolumes)
+        args << "-v" << v;
     args << "-w" << (workdir.isEmpty() ? mount : workdir);
     args << image << "sleep" << "infinity";
 
