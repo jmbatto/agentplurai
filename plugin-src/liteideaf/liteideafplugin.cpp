@@ -516,15 +516,32 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
         restart = field("{{.HostConfig.RestartPolicy.Name}}");
 
         const QString envRaw = field("{{range .Config.Env}}{{.}}\\n{{end}}");
-        for (const QString &line : envRaw.split('\n', Qt::SkipEmptyParts))
-            if (line.contains('='))
-                extraEnv << line;
-
-        const QString mountsRaw = field("{{range .Mounts}}{{if ne .Destination \"/work/project\"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}:{{.Destination}}\\n{{end}}{{end}}");
-        for (const QString &line : mountsRaw.split('\n', Qt::SkipEmptyParts)) {
-            if (line.contains(":.cline") || line.endsWith("/.cline") || !line.contains(':'))
+        for (const QString &line : envRaw.split('\n', Qt::SkipEmptyParts)) {
+            const int eq = line.indexOf('=');
+            if (eq <= 0)
                 continue;
-            extraVolumes << line;
+            const QString key = line.left(eq);
+            if (key.isEmpty() || key.contains(' ') || key.contains('='))
+                continue;
+            extraEnv << line;
+        }
+
+        // Délimiteur '|' : un chemin Windows (C:/...) ne casse plus le split.
+        const QString mountsRaw = field("{{range .Mounts}}{{if ne .Destination \"/work/project\"}}{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}|{{.Destination}}\\n{{end}}{{end}}");
+        for (const QString &line : mountsRaw.split('\n', Qt::SkipEmptyParts)) {
+            const int bar = line.indexOf('|');
+            if (bar <= 0)
+                continue;
+            const QString src = line.left(bar);
+            const QString dst = line.mid(bar + 1);
+            if (src.isEmpty() || dst.isEmpty() || !dst.startsWith('/'))
+                continue;
+            if (dst == "/home/mpiuser/.cline" || dst == "/root/.cline" || dst.endsWith("/.cline"))
+                continue;
+            // Bind Windows (C:/...) : Docker le coupe sur ':'. On ne le propage pas.
+            if (src.size() >= 2 && src.at(1) == ':')
+                continue;
+            extraVolumes << src + ":" + dst;
         }
         const QString labelsRaw = field("{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}\\n{{end}}");
         for (const QString &line : labelsRaw.split('\n', Qt::SkipEmptyParts))
