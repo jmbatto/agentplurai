@@ -496,31 +496,45 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
     QString shm, restart;
     QString healthCmd, healthInterval, healthTimeout, healthRetries, healthStart;
 
-    // Reject empty, missing, or template-nil values. Never propagate a default.
-    auto field = [this, &name](const QString &tmpl) -> QString {
-        int code = 1;
-        const QString v = run("docker", {"inspect", "-f", tmpl, name}, 8000, &code).trimmed();
-        if (code != 0 || v.isEmpty() || v == "<no value>" || v == "[]" || v == "map[]" || v == "<nil>")
-            return {};
-        return v;
-    };
-
+    QJsonObject root;
     if (exists) {
-        const QString state = field("{{.State.Running}}");
-        running = state == "true";
-        const QString mounted = field(
-            "{{range .Mounts}}{{if eq .Destination \"" + mount + "\"}}{{.Source}}{{end}}{{end}}");
-        sameMount = mountsMatch(mounted, host);
+        int code = 1;
+        const QString raw = run("docker", {"inspect", name}, 15000, &code);
+        const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8());
+        if (code != 0 || !doc.isArray() || doc.array().isEmpty()) {
+            warn("Inspect illisible pour " + name);
+            return false;
+        }
+        root = doc.array().at(0).toObject();
 
-        network = field("{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}");
-        hostname = field("{{.Config.Hostname}}");
-        user = field("{{.Config.User}}");
-        workdir = field("{{.Config.WorkingDir}}");
-        shm = field("{{.HostConfig.ShmSize}}");
-        restart = field("{{.HostConfig.RestartPolicy.Name}}");
+        const QJsonObject state = root.value("State").toObject();
+        running = state.value("Running").toBool();
 
-        const QString envRaw = field("{{range .Config.Env}}{{.}}\\n{{end}}");
-        for (const QString &line : envRaw.split('\n', Qt::SkipEmptyParts)) {
+        const QJsonObject config = root.value("Config").toObject();
+        const QJsonObject hostCfg = root.value("HostConfig").toObject();
+        const QJsonObject netSettings = root.value("NetworkSettings").toObject();
+
+        hostname = config.value("Hostname").toString();
+        user = config.value("User").toString();
+        workdir = config.value("WorkingDir").toString();
+
+        const QJsonObject nets = netSettings.value("Networks").toObject();
+        for (auto it = nets.begin(); it != nets.end(); ++it) {
+            if (it.key() != "bridge") {
+                network = it.key();
+                break;
+            }
+        }
+        if (network.isEmpty() && !nets.isEmpty())
+            network = nets.begin().key();
+
+        const qint64 shmVal = hostCfg.value("ShmSize").toVariant().toLongLong();
+        if (shmVal > 0 && shmVal != 67108864)
+            shm = QString::number(shmVal);
+        restart = hostCfg.value("RestartPolicy").toObject().value("Name").toString();
+
+        for (const QJsonValue &v : config.value("Env").toArray()) {
+            const QString line = v.toString();
             const int eq = line.indexOf('=');
             if (eq <= 0)
                 continue;
@@ -530,63 +544,128 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
             extraEnv << line;
         }
 
-        // '|' delimiter: a Windows path (C:/...) no longer breaks the split.
-        // Skip the project bind (reapplied below) and .cline (compose-owned).
-        // Skip Windows drive binds: Docker splits on ':' ("too many colons").
-        const QString mountsRaw = field(
-            "{{range .Mounts}}{{if ne .Destination \"" + mount + "\"}}"
-            "{{if .Name}}{{.Name}}{{else}}{{.Source}}{{end}}|{{.Destination}}\\n{{end}}{{end}}");
-        for (const QString &line : mountsRaw.split('\n', Qt::SkipEmptyParts)) {
-            const int bar = line.indexOf('|');
-            if (bar <= 0)
-                continue;
-            const QString src = line.left(bar);
-            const QString dst = line.mid(bar + 1);
-            if (src.isEmpty() || dst.isEmpty() || !dst.startsWith('/'))
-                continue;
-            if (dst == "/home/mpiuser/.cline" || dst == "/root/.cline" || dst.endsWith("/.cline"))
-                continue;
-            if (src.size() >= 2 && src.at(1) == ':')
-                continue;
-            extraVolumes << src + ":" + dst;
+        auto destOf = [](const QString &spec) -> QString {
+            const int colon = spec.lastIndexOf(':');
+            if (colon < 0)
+                return {};
+            QString dst = spec.mid(colon + 1);
+            if (dst == "ro" || dst == "rw" || dst == "z" || dst == "Z") {
+                const int prev = spec.lastIndexOf(':', colon - 1);
+                if (prev < 0)
+                    return {};
+                dst = spec.mid(prev + 1, colon - prev - 1);
+            }
+            return dst;
+        };
+        auto skipDst = [&mount](const QString &dst) {
+            return dst == mount || dst == "/home/mpiuser/.cline" || dst == "/root/.cline"
+                || dst.endsWith("/.cline");
+        };
+
+        QString projectSrc;
+        for (const QJsonValue &v : root.value("Mounts").toArray()) {
+            const QJsonObject m = v.toObject();
+            if (m.value("Destination").toString() == mount) {
+                projectSrc = m.value("Source").toString();
+                break;
+            }
         }
-        const QString labelsRaw = field("{{range $k, $v := .Config.Labels}}{{$k}}={{$v}}\\n{{end}}");
-        for (const QString &line : labelsRaw.split('\n', Qt::SkipEmptyParts))
-            if (line.contains('='))
-                labels << line;
-        const QString aliasRaw = field("{{range .NetworkSettings.Networks}}{{range .Aliases}}{{.}}\\n{{end}}{{end}}");
-        for (const QString &line : aliasRaw.split('\n', Qt::SkipEmptyParts))
-            if (!line.isEmpty() && line != name)
-                aliases << line;
-        const QString exposeRaw = field("{{range $p, $v := .Config.ExposedPorts}}{{$p}}\\n{{end}}");
-        for (const QString &line : exposeRaw.split('\n', Qt::SkipEmptyParts)) {
-            const QString port = line.split('/').first();
+        sameMount = mountsMatch(projectSrc, host);
+
+        for (const QJsonValue &v : hostCfg.value("Binds").toArray()) {
+            const QString spec = v.toString();
+            const QString dst = destOf(spec);
+            if (dst.isEmpty() || skipDst(dst))
+                continue;
+            extraVolumes << spec;
+        }
+        for (const QJsonValue &v : hostCfg.value("Mounts").toArray()) {
+            const QJsonObject m = v.toObject();
+            const QString type = m.value("Type").toString();
+            const QString src = m.value("Source").toString();
+            const QString dst = m.value("Target").toString();
+            if (src.isEmpty() || dst.isEmpty() || !dst.startsWith('/') || skipDst(dst))
+                continue;
+            bool already = false;
+            for (const QString &ev : extraVolumes)
+                if (destOf(ev) == dst) {
+                    already = true;
+                    break;
+                }
+            if (already)
+                continue;
+            if (type == "volume" || dst.startsWith("/run/secrets"))
+                extraVolumes << src + ":" + dst;
+        }
+
+        const QJsonObject labelObj = config.value("Labels").toObject();
+        for (auto it = labelObj.begin(); it != labelObj.end(); ++it)
+            labels << it.key() + "=" + it.value().toString();
+
+        for (auto it = nets.begin(); it != nets.end(); ++it) {
+            for (const QJsonValue &a : it.value().toObject().value("Aliases").toArray()) {
+                const QString alias = a.toString();
+                if (!alias.isEmpty() && alias != name)
+                    aliases << alias;
+            }
+        }
+
+        const QJsonObject exposed = config.value("ExposedPorts").toObject();
+        for (auto it = exposed.begin(); it != exposed.end(); ++it) {
+            const QString port = it.key().section('/', 0, 0);
             if (!port.isEmpty())
                 exposes << port;
         }
-        // Strip CMD / CMD-SHELL: --health-cmd expects the bare command.
-        if (!field("{{.Config.Healthcheck}}").isEmpty()) {
-            QString raw = field("{{range .Config.Healthcheck.Test}}{{.}} {{end}}").trimmed();
-            if (raw.startsWith("CMD-SHELL "))
-                raw = raw.mid(10);
-            else if (raw.startsWith("CMD "))
-                raw = raw.mid(4);
-            healthCmd = raw.trimmed();
-            healthInterval = field("{{.Config.Healthcheck.Interval}}");
-            healthTimeout = field("{{.Config.Healthcheck.Timeout}}");
-            healthRetries = field("{{.Config.Healthcheck.Retries}}");
-            healthStart = field("{{.Config.Healthcheck.StartPeriod}}");
+
+        const QJsonObject hc = config.value("Healthcheck").toObject();
+        if (!hc.isEmpty()) {
+            QStringList parts;
+            for (const QJsonValue &t : hc.value("Test").toArray())
+                parts << t.toString();
+            if (!parts.isEmpty() && (parts.first() == "CMD" || parts.first() == "CMD-SHELL"))
+                parts.removeFirst();
+            healthCmd = parts.join(' ').trimmed();
+            const qint64 interval = hc.value("Interval").toVariant().toLongLong();
+            const qint64 timeout = hc.value("Timeout").toVariant().toLongLong();
+            const int retries = hc.value("Retries").toInt();
+            const qint64 start = hc.value("StartPeriod").toVariant().toLongLong();
+            if (interval > 0)
+                healthInterval = QString::number(interval);
+            if (timeout > 0)
+                healthTimeout = QString::number(timeout);
+            if (retries > 0)
+                healthRetries = QString::number(retries);
+            if (start > 0)
+                healthStart = QString::number(start);
         }
     }
 
     // Early return only when the project bind and every extra volume are present.
     if (exists && running && sameMount) {
         bool volumesOk = true;
+        const QJsonArray liveMounts = root.value("Mounts").toArray();
+        auto destOf = [](const QString &spec) -> QString {
+            const int colon = spec.lastIndexOf(':');
+            if (colon < 0)
+                return {};
+            QString dst = spec.mid(colon + 1);
+            if (dst == "ro" || dst == "rw" || dst == "z" || dst == "Z") {
+                const int prev = spec.lastIndexOf(':', colon - 1);
+                if (prev < 0)
+                    return {};
+                dst = spec.mid(prev + 1, colon - prev - 1);
+            }
+            return dst;
+        };
         for (const QString &v : extraVolumes) {
-            const QString dst = v.section(':', 1);
-            const QString got = field(
-                "{{range .Mounts}}{{if eq .Destination \"" + dst + "\"}}ok{{end}}{{end}}");
-            if (got != "ok") {
+            const QString dst = destOf(v);
+            bool found = false;
+            for (const QJsonValue &m : liveMounts)
+                if (m.toObject().value("Destination").toString() == dst) {
+                    found = true;
+                    break;
+                }
+            if (!found) {
                 volumesOk = false;
                 break;
             }

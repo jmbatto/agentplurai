@@ -4,7 +4,7 @@
 #include "liteapi/liteapi.h"
 
 // Bump on every plugin delivery.
-#define LITEIDEAF_VERSION "0.18"
+#define LITEIDEAF_VERSION "0.21"
 
 class QDialog;
 class QLabel;
