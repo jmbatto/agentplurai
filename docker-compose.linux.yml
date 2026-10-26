@@ -22,7 +22,7 @@ services:
     build:
       <<: *build
       target: dev-linux
-    image: liteide-dev-linux:qt6
+    image: jmbatto/liteide-dev-linux:latest
     working_dir: /work
     stdin_open: true
     tty: true
@@ -55,7 +55,7 @@ services:
     restart: "no"
 
   export:
-    image: liteide-dev-linux:qt6
+    image: jmbatto/liteide-dev-linux:latest
     working_dir: /dist
     environment:
       DIST: /dist
