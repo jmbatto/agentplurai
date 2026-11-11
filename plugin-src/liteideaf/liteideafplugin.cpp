@@ -742,7 +742,7 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
     for (const QString &v : extraVolumes)
         args << "-v" << v;
     args << "-w" << (workdir.isEmpty() ? mount : workdir);
-    args << image << "sleep" << "infinity";
+    args << image;
 
     int code = 1;
     const QString out = run("docker", args, 60000, &code);
