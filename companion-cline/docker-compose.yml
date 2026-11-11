@@ -1,31 +1,72 @@
-# Companion lancé depuis le dossier du projet.
-# Le projet hôte est monté sur /work/project.
-# Le conteneur crée /work/project/.agentplurai pour l'historique.
-#
-# Depuis le projet :
-#   docker compose -f <chemin>/docker-compose.yml up -d
-
-
-name: cline-project
-
+# Cline node for the MPI/Slurm cluster.
+# Inherits supervisord from jmbatto/m2chps-mpi41-slurm.
+# SLURMPARAM=slurmd makes the base entrypoint start slurmd
+# after slurmctld is up. Munge starts via [program:munged].
+# No user:, no entrypoint:, no command: — the base image owns those.
+name: slurm-hpc
 services:
-  cline-project:
-    build: .
-    image: cline-project:go1.27.2
-    container_name: cline-project
-    stdin_open: true
-    tty: true
+  cline:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jmbatto/m2chps-mpi41-cline:latest
+    container_name: cline-mpi
+    hostname: cline
     working_dir: /work/project
-    volumes:
-      - type: bind
-        source: ${PROJECT_DIR:-.}
-        target: /work/project
-      - type: bind
-        source: ${CLINE_CONFIG:-./cline-config}
-        target: /root/.cline
     environment:
+      SLURMPARAM: slurmd
       CLINE_TELEMETRY_DISABLED: "true"
       DO_NOT_TRACK: "1"
       GOTOOLCHAIN: local
-    # volontairement absent : /var/run/docker.sock
+      PATH: /opt/venv/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/sbin:/bin
+    volumes:
+      - slurm-hpc_usrlocalworkproject:/work/project
+      - slurm-hpc_etc_munge:/etc/munge
+      - slurm-hpc_slurm_jobdir:/data
+      - slurm-hpc_var_log_slurm:/var/log/slurm
+      - slurm-hpc_usrlocalvarmpi-foo:/usr/local/var/mpishare
+      - cline-config:/root/.cline
+    expose:
+      - "6818"
+    shm_size: "512m"
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - FSETID
+      - SETGID
+      - SETUID
+      - SETPCAP
+      - KILL
+      - NET_BIND_SERVICE
+      - SYS_NICE
+      - SYS_PTRACE
+      - IPC_LOCK
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - mpinet
     restart: "no"
+
+networks:
+  mpinet:
+    name: mpinet
+    external: true
+volumes:
+  slurm-hpc_usrlocalworkproject:
+    external: true
+  slurm-hpc_usrlocalvarmpi-foo:
+    external: true
+  slurm-hpc_etc_munge:
+    external: true
+  slurm-hpc_slurm_jobdir:
+    external: true
+  slurm-hpc_var_log_slurm:
+    external: true
+  cline-config:
+    name: slurm-hpc_cline-config
