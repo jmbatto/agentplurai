@@ -4,7 +4,7 @@
 #include "liteapi/liteapi.h"
 
 // Bump on every plugin delivery.
-#define LITEIDEAF_VERSION "0.25"
+#define LITEIDEAF_VERSION "0.26"
 
 class QDialog;
 class QLabel;
@@ -84,6 +84,8 @@ private:
     bool clearPending(const QString &name);
     bool ensureGitBranch(const QString &root);
     bool ensureContainer(const QString &host);
+    bool targetReady(QString *reason) const;
+    QString workingHost(QString *containerOut = nullptr) const;
     bool mountsMatch(const QString &mounted, const QString &want) const;
     void writeOk();
     void sealSnapshot();

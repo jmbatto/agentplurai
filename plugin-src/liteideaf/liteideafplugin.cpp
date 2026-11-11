@@ -461,6 +461,53 @@ bool LiteIdeAfPlugin::mountsMatch(const QString &mounted, const QString &want) c
     return !a.isEmpty() && !b.isEmpty() && (a == b || a.endsWith(b) || b.endsWith(a));
 }
 
+bool LiteIdeAfPlugin::targetReady(QString *reason) const
+{
+    const QString engine = activeCline();
+    const QString block = engineBlock(engine);
+    const QString image = blockValue(block, "image");
+    const QString name = blockValue(block, "container");
+    if (image.isEmpty() || name.isEmpty()) {
+        if (reason)
+            *reason = "image ou container absent dans le YAML";
+        return false;
+    }
+    int code = 1;
+    run("docker", {"image", "inspect", image}, 8000, &code);
+    if (code != 0) {
+        if (reason)
+            *reason = "image introuvable : " + image;
+        return false;
+    }
+    return true;
+}
+
+QString LiteIdeAfPlugin::workingHost(QString *containerOut) const
+{
+    const QString name = blockValue(engineBlock(activeCline()), "container");
+    if (containerOut)
+        *containerOut = name;
+    if (name.isEmpty())
+        return QString();
+    int code = 1;
+    const QString raw = run("docker", {"inspect", name}, 8000, &code);
+    if (code != 0)
+        return QString();
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.toUtf8());
+    if (!doc.isArray() || doc.array().isEmpty())
+        return QString();
+    const QJsonObject root = doc.array().at(0).toObject();
+    if (!root.value("State").toObject().value("Running").toBool())
+        return QString();
+    const QString mount = containerRoot().isEmpty() ? "/work/project" : containerRoot();
+    for (const QJsonValue &v : root.value("Mounts").toArray()) {
+        const QJsonObject m = v.toObject();
+        if (m.value("Destination").toString() == mount)
+            return m.value("Source").toString();
+    }
+    return QString();
+}
+
 bool LiteIdeAfPlugin::ensureContainer(const QString &host)
 {
     // Recreate only when the project bind or an extra volume is missing.
@@ -1147,6 +1194,21 @@ void LiteIdeAfPlugin::alignProject()
     if (!ensureContract())
         return;
 
+    QString why;
+    if (!targetReady(&why)) {
+        QString current;
+        const QString hostNow = workingHost(&current);
+        QString msg = "Cible Cline invalide : " + why + ".\nBascule refusée.";
+        if (!hostNow.isEmpty())
+            msg += "\nContexte fonctionnel conservé :\n  Projet : " + hostNow
+                 + "\n  Cible : " + current;
+        else
+            msg += "\nAucun contexte fonctionnel en cours.";
+        warn(msg);
+        logEvent("reject  reason=target-invalid  detail=" + why);
+        return;
+    }
+
     // Toujours valider le conteneur, même si le YAML est déjà bon.
     if (!ensureContainer(live))
         return;
@@ -1262,6 +1324,18 @@ void LiteIdeAfPlugin::sendPrompt()
         return;
     const QString live = currentProjectRoot();
     if (!live.isEmpty() && blockValue(engineBlock(activeCline()), "kind") == "agent") {
+        QString why;
+        if (!targetReady(&why)) {
+            QString current;
+            const QString hostNow = workingHost(&current);
+            QString msg = "Cible Cline invalide : " + why + ".\nEnvoi refusé.";
+            if (!hostNow.isEmpty())
+                msg += "\nContexte fonctionnel conservé :\n  Projet : " + hostNow
+                     + "\n  Cible : " + current;
+            warn(msg);
+            logEvent("reject  reason=target-invalid  detail=" + why);
+            return;
+        }
         if (!ensureContainer(live))
             return;
         if (!ensureGitBranch(live))
