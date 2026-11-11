@@ -645,8 +645,8 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
                 continue;
             if (type == "volume" && !name.isEmpty())
                 extraVolumes << name + ":" + dst;
-            else if (dst.startsWith("/run/secrets") && !src.isEmpty())
-                extraVolumes << src + ":" + dst;
+            else if ((dst.contains("/.cline") || dst.startsWith("/run/secrets")) && !src.isEmpty())
+                extraVolumes << (name.isEmpty() ? src : name) + ":" + dst;
         }
 
         for (const QJsonValue &v : hostCfg.value("CapDrop").toArray()) {
@@ -1652,9 +1652,11 @@ void LiteIdeAfPlugin::showQuota()
     }
     const QString script =
         "set -e; "
-        "f=/root/.cline/data/settings/providers.json; "
+        "f=/home/mpiuser/.cline/data/settings/providers.json; "
+        "[ -f \"$f\" ] || f=/home/mpiuser/.cline/data/secrets.json; "
+        "[ -f \"$f\" ] || f=/root/.cline/data/settings/providers.json; "
         "[ -f \"$f\" ] || f=/root/.cline/data/secrets.json; "
-        "if [ ! -f \"$f\" ]; then echo 'Aucun fichier de clé dans /root/.cline'; exit 0; fi; "
+        "if [ ! -f \"$f\" ]; then echo 'Aucun fichier de clé dans /home/mpiuser/.cline ni /root/.cline'; exit 0; fi; "
         "key=$(node -e '"
         "const fs=require(\"fs\");"
         "const j=JSON.parse(fs.readFileSync(process.argv[1],\"utf8\"));"
@@ -1665,7 +1667,7 @@ void LiteIdeAfPlugin::showQuota()
         "else walk(v);}};"
         "walk(j);process.stdout.write(keys[0]||\"\");"
         "' \"$f\"); "
-        "if [ -z \"$key\" ]; then echo 'Clé introuvable dans /root/.cline'; exit 0; fi; "
+        "if [ -z \"$key\" ]; then echo 'Clé introuvable dans .cline'; exit 0; fi; "
         "curl -fsS -H \"Authorization: Bearer $key\" -H \"Accept: application/json\" "
         "https://api.z.ai/api/monitor/usage/quota/limit "
         "|| curl -fsS -H \"Authorization: $key\" -H \"Accept: application/json\" "
