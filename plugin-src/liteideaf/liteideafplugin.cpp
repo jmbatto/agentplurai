@@ -494,6 +494,7 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
     bool sameMount = false;
     QString network, hostname, user, workdir;
     QStringList extraEnv, extraVolumes, labels, aliases, exposes;
+    QStringList capDrop, capAdd, securityOpt;
     QString shm, restart;
     QString healthCmd, healthInterval, healthTimeout, healthRetries, healthStart;
 
@@ -582,9 +583,10 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
         for (const QJsonValue &v : hostCfg.value("Mounts").toArray()) {
             const QJsonObject m = v.toObject();
             const QString type = m.value("Type").toString();
+            const QString name = m.value("Name").toString();
             const QString src = m.value("Source").toString();
             const QString dst = m.value("Target").toString();
-            if (src.isEmpty() || dst.isEmpty() || !dst.startsWith('/') || skipDst(dst))
+            if (dst.isEmpty() || !dst.startsWith('/') || skipDst(dst))
                 continue;
             bool already = false;
             for (const QString &ev : extraVolumes)
@@ -594,8 +596,26 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
                 }
             if (already)
                 continue;
-            if (type == "volume" || dst.startsWith("/run/secrets"))
+            if (type == "volume" && !name.isEmpty())
+                extraVolumes << name + ":" + dst;
+            else if (dst.startsWith("/run/secrets") && !src.isEmpty())
                 extraVolumes << src + ":" + dst;
+        }
+
+        for (const QJsonValue &v : hostCfg.value("CapDrop").toArray()) {
+            const QString c = v.toString();
+            if (!c.isEmpty())
+                capDrop << c;
+        }
+        for (const QJsonValue &v : hostCfg.value("CapAdd").toArray()) {
+            const QString c = v.toString();
+            if (!c.isEmpty())
+                capAdd << c;
+        }
+        for (const QJsonValue &v : hostCfg.value("SecurityOpt").toArray()) {
+            const QString s = v.toString();
+            if (!s.isEmpty())
+                securityOpt << s;
         }
 
         const QJsonObject labelObj = config.value("Labels").toObject();
@@ -710,6 +730,12 @@ bool LiteIdeAfPlugin::ensureContainer(const QString &host)
         if (!healthStart.isEmpty() && healthStart != "0")
             args << "--health-start-period" << healthStart;
     }
+    for (const QString &c : capDrop)
+        args << "--cap-drop" << c;
+    for (const QString &c : capAdd)
+        args << "--cap-add" << c;
+    for (const QString &s : securityOpt)
+        args << "--security-opt" << s;
     for (const QString &e : extraEnv)
         args << "-e" << e;
     args << "-v" << QDir::fromNativeSeparators(host) + ":" + mount;
