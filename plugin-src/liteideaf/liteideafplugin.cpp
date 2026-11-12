@@ -1,3 +1,5 @@
+// copyright 2026, Jean-Michel Batto
+// MIT License
 #include "liteideafplugin.h"
 
 #include "liteeditorapi/liteeditorapi.h"

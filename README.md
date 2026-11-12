@@ -1,35 +1,45 @@
-# LiteIDE, built and extended
+# AgentPlurAI
 
-One image, three deliveries. The image holds the MinGW toolchain and the native Qt 6 toolchain. Each OS has its own compose file, which fixes the plugin script and the output directory.
+A LiteIDE plugin that talks to AI engines from the editor. One Cline companion per open project, plus any number of local Ollama endpoints. The Z.ai key stays inside the Cline container. It is never stored by the plugin or written to the host.
 
-```text
-liteide-windows-docker/
-  Dockerfile
-  docker-compose.windows.yml   -> image liteide-dev-windows:qt6 -> ./dist-win
-  docker-compose.linux.yml     -> image liteide-dev-linux:qt6  -> ./dist-linux
-  build-windows.sh             LiteIDE cross-build
-  build-linux.sh               LiteIDE native build
-  build-macos.sh               LiteIDE native, run on a Mac
-  build-plugin.sh              plugin DLL
-  build-plugin-linux.sh        plugin .so
-  build-plugin-macos.sh        plugin .dylib, run on a Mac
-  distribute.sh                IDE + plugin into /dist
-  plugin-src/liteideaf/        AgentPlurAI plugin sources
+## Stack
+
+AgentPlurAI is the middle layer of a three-piece lab.
+
+| Layer | Repository | Role |
+| --- | --- | --- |
+| Cluster | [mpi41-slurm-trixie](https://github.com/jmbatto/mpi41-slurm-trixie) | Debian Trixie image. Slurm 23.02, OpenMPI 4.1.8, MUNGE, supervisord. Compose brings up controller, database, and compute nodes. |
+| Plugin | this repository | Qt plugin loaded by LiteIDE. Menu for prompts, history, health, quota, and project alignment. YAML contract for engines. |
+| Companion | [companion-cline](https://github.com/jmbatto/agentplurai/tree/main/companion-cline) | Cline node derived from the cluster image. Adds Go and Cline. Joins the same Docker network. Holds the Z.ai token in a volume. |
+
+The cluster is a functional simulation: jobs run as a normal user, not as root. The companion is a development harness. It sees only the volumes and network you give it. It does not mount the Docker socket, so it cannot escape to the host that runs Docker.
+
+## What the plugin does
+
+- Sends a prompt with a chosen scope: selection, current file, or project.
+- Keeps a history of prompts and replies.
+- Aligns the Cline container to the active LiteIDE project (recreates the container with the new mount, preserves the token volume).
+- Reads health and remaining quota from the Cline container.
+- Talks to one or more Ollama endpoints declared in YAML.
+- Hides model reasoning by default. The behaviour is a setting.
+
+The plugin does not call the Z.ai API itself. It asks the companion container to run Cline. The token is entered once inside that container.
+
+## Layout
+
+```
+agentplurai/
+├── plugin-src/liteideaf/     Qt plugin source
+├── plugin-src/scaffold/      starting point for a new plugin
+├── companion-cline/          Cline node (Dockerfile + compose)
+├── docker-compose.linux.yml  build LiteIDE + plugin on Linux
+├── docker-compose.windows.yml
+└── distribute.sh             export the binary and plugins
 ```
 
-Run from this directory.
+## Build the plugin
 
-## Windows
-
-```bash
-docker compose -f docker-compose.windows.yml build
-docker compose -f docker-compose.windows.yml run --rm plugin
-docker compose -f docker-compose.windows.yml run --rm export
-```
-
-Result: `./dist-win/bin/liteide.exe` and `liteideaf.dll`.
-
-## Linux
+Linux:
 
 ```bash
 docker compose -f docker-compose.linux.yml build
@@ -37,160 +47,38 @@ docker compose -f docker-compose.linux.yml run --rm plugin
 docker compose -f docker-compose.linux.yml run --rm export
 ```
 
-Result: `./dist-linux/bin/liteide`. A wrapper sets `LD_LIBRARY_PATH` and `LITEIDE_RES_PATH`. Qt 6 is bundled.
+Windows uses `docker-compose.windows.yml`. The export lands under `dist/`. Copy the LiteIDE tree and the plugin library to the host and launch the binary.
 
-## macOS
+## Configure
 
-The Apple SDK is not cross-compilable. Run on a Mac, not in Docker.
+The plugin reads `agentplurai.yaml` next to the project or from a path you set. Minimal shape:
 
-```bash
-brew install qt go
-export PATH="$(brew --prefix qt)/bin:${PATH}"
-./build-macos.sh
-./build-plugin-macos.sh
+```yaml
+cline:
+  container: cline-mpi
+  workdir: /work/project
+ollama:
+  - name: qwen
+    url: http://host.docker.internal:11434
+    model: qwen2.5
+hide_thinking: true
 ```
 
-Result: `./dist-mac/LiteIDE.app`.
+The Z.ai token is not in this file. It lives in the `cline-config` volume inside the companion.
 
-`plugin` must run before `export`. The plugin binary is written into the bind-mounted `plugin-src` tree; `export` picks it up and places it next to the LiteIDE binary.
+## Security boundary
 
-## Why the plugin
+- The companion does not mount the Docker socket.
+- Capabilities are dropped. `no-new-privileges` is set.
+- The Cline process runs as `mpiuser` (uid 1001) through a wrapper. Supervisord stays root so the base image can start its daemons.
+- MUNGE, if mounted, is read-only.
+- MySQL of the cluster is on a dedicated internal network. Only `slurmdbd` can reach it.
 
-LiteIDE is a small Go IDE. It has no agent. AgentPlurAI adds one menu that talks to models without leaving the editor.
+## Build another plugin
 
-- One Cline per open Go project, inside a Docker companion. The Z.ai key stays in the container volume `cline-config`, never in the plugin.
-- Several Ollama servers in parallel. Each is an HTTP endpoint in the YAML.
-- The plugin sees the open folder, the current file, and the selection. It sends one of those to the active engine.
-- Align recreates the container when the project changes. Only the project mount changes. The key is kept.
+Copy `plugin-src/scaffold/` to a new directory. Implement `LiteApi::IPlugin`. Point the build script at it. The scaffold shows the contract: load, menu actions, access to the open file and selection. See the scaffold README for the exact steps.
 
-Menu, YAML, and multi-Ollama details: `plugin-src/liteideaf/README.md`.
+## Related
 
-| Entry | Role |
-|---|---|
-| Scope | Open folder, current file, selection. |
-| Prompt | Input, radio selection / file / project, send to the active engine. |
-| History | `.agentplurai/prompts.log`. |
-| Journal | `.agentplurai/actions.log`. |
-| Reload | Reopen files the agent wrote. |
-| Default AI | Engine used by Prompt. |
-| Align project | Recreate the container if it is down or mounts the wrong folder. Keeps the key. |
-| System prompt | Global prompt and per-engine prompt. |
-| Hide thinking | Check box. Hides or shows the model reasoning (`thinking_progress`). |
-| Health | Plugin version, Cline state, Ollama reachability. |
-| Cline quota | Remaining Z.ai credit, read from the key already in the container. |
-
-## Building another plugin
-
-This tree is a working example, not a closed product. Copy `plugin-src/liteideaf/` and change the names. The build path (compose, qmake, `distribute.sh`) stays the same.
-
-The example below is called `scaffold`. It is the smallest plugin that loads, adds a menu, and does nothing else. Use it as the starting point for a real one.
-
-### 1. Copy the skeleton
-
-```text
-plugin-src/scaffold/
-  scaffold.pro
-  scaffoldplugin.h
-  scaffoldplugin.cpp
-```
-
-### 2. The contract
-
-A LiteIDE plugin is a Qt plugin that implements `LiteApi::IPlugin`. The factory declares the id. The id is what LiteIDE loads.
-
-`scaffoldplugin.h`:
-
-```cpp
-class ScaffoldPlugin : public LiteApi::IPlugin {
-    Q_OBJECT
-public:
-    ScaffoldPlugin();
-    bool load(LiteApi::IApplication *app) override;
-private:
-    LiteApi::IApplication *m_app = nullptr;
-};
-
-class PluginFactory : public LiteApi::PluginFactoryT<ScaffoldPlugin> {
-    Q_OBJECT
-    Q_INTERFACES(LiteApi::IPluginFactory)
-    Q_PLUGIN_METADATA(IID "liteidex.ScaffoldPlugin")
-public:
-    PluginFactory() {
-        m_info->setId("plugin/scaffold");
-        m_info->setName("Scaffold");
-        m_info->setVer("0.1");
-        m_info->appendDepend("plugin/liteeditor");
-    }
-};
-```
-
-`scaffoldplugin.cpp`:
-
-```cpp
-bool ScaffoldPlugin::load(LiteApi::IApplication *app) {
-    if (!app) return false;
-    m_app = app;
-    QMenu *menu = app->actionManager()->insertMenu("menu/scaffold", "Scaffold");
-    if (!menu) return true;
-    QAction *act = menu->addAction("Hello");
-    connect(act, &QAction::triggered, this, [app]() {
-        QMessageBox::information(app->mainWindow(), "Scaffold", "Plugin loaded.");
-    });
-    return true;
-}
-```
-
-Rules that matter:
-
-- `TARGET` in the `.pro` is the binary name (`scaffold.dll`, `libscaffold.so`).
-- `CONFIG += plugin` makes it a Qt plugin, not a program.
-- `IDE_SOURCE_TREE` points at `liteidex`. The headers live in `src/api`.
-- Link `liteapi`. On Linux it must be built with `-fPIC` (already done by `build-linux.sh`).
-- `DESTDIR` is the plugins directory. `distribute.sh` copies whatever lands there.
-- Do not edit LiteIDE's own `plugins.pro`. The plugin is built outside the official tree.
-
-### 3. The `.pro`
-
-```qmake
-TARGET = scaffold
-TEMPLATE = lib
-QT += widgets
-CONFIG += plugin plugin_with_soname c++17
-CONFIG -= debug debug_and_release
-
-isEmpty(IDE_SOURCE_TREE): IDE_SOURCE_TREE = /src/liteide/liteidex
-isEmpty(IDE_PLUGIN_PATH): IDE_PLUGIN_PATH = /dist/lib/liteide/plugins
-
-INCLUDEPATH += $$IDE_SOURCE_TREE/src/api $$IDE_SOURCE_TREE/src/api/liteapi
-DESTDIR = $$IDE_PLUGIN_PATH
-LIBS += -L$$IDE_SOURCE_TREE/liteide/lib/liteide -lliteapi
-
-HEADERS += scaffoldplugin.h
-SOURCES += scaffoldplugin.cpp
-```
-
-On Linux, add `CONFIG += pic` and `-fPIC` to `QMAKE_CXXFLAGS` and `QMAKE_LFLAGS`, as `liteideaf.pro` does. A static `liteapi.a` without PIC will not link into a `.so`.
-
-### 4. Build and ship
-
-Point the compose plugin service at `plugin-src/scaffold`, or add a second script that runs `qmake && make` in that directory. Then:
-
-```bash
-docker compose -f docker-compose.linux.yml run --rm plugin
-docker compose -f docker-compose.linux.yml run --rm export
-```
-
-The binary appears in `dist-linux/lib/liteide/plugins/`. Restart LiteIDE. The menu **Scaffold** is there if the id is unique and the dependency `plugin/liteeditor` is loaded.
-
-### 5. What to change for a real plugin
-
-| Piece | Where | What to set |
-|---|---|---|
-| Id | `setId` | `plugin/<name>`, unique. |
-| Menu | `insertMenu` | Label the user sees. |
-| Actions | `menu->addAction` | One slot per verb. |
-| Settings | `app->settings()` | Persist small state. |
-| Files | `app->fileManager()`, `app->editorManager()` | Current file, selection, open folder. |
-| Version | a `#define` in the header | Shown in a Health entry. Bump it on each delivery. |
-
-AgentPlurAI is the long form of this: a menu, a YAML contract, and calls to Docker or HTTP. A new plugin can stop at the menu, or grow the same way.
+- Cluster image and compose: [mpi41-slurm-trixie](https://github.com/jmbatto/mpi41-slurm-trixie)
+- Cline node details: [companion-cline](https://github.com/jmbatto/agentplurai/tree/main/companion-cline)

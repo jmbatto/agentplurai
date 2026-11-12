@@ -1,3 +1,5 @@
+// copyright 2026, Jean-Michel Batto
+// MIT License
 #ifndef LITEIDEAFPLUGIN_H
 #define LITEIDEAFPLUGIN_H
 
